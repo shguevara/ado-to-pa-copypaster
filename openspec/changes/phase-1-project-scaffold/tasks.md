@@ -37,7 +37,7 @@
 
 ## 8. Verification
 
-- [ ] 8.1 Open `chrome://extensions`, enable Developer Mode, click "Load unpacked", and select the project directory. Confirm that Chrome accepts the extension with no error banner (SPEC.md §11 Phase 1, spec: *Extension loads in Chrome without manifest errors*).
-- [ ] 8.2 Click the extension action icon in the Chrome toolbar. Confirm the Side Panel opens and displays the "Hello" placeholder text without any JavaScript errors in the DevTools console (spec: *Side panel displays placeholder content*).
-- [ ] 8.3 Open the service worker DevTools console (from `chrome://extensions` → "Service Worker" link). Confirm `"SW started"` is logged (spec: *Service worker logs startup message*).
-- [ ] 8.4 Confirm the extension icon is visible (not broken/missing) in the Chrome toolbar (spec: *Extension icon appears in Chrome toolbar*).
+- [x] 8.1 Open `chrome://extensions`, enable Developer Mode, click "Load unpacked", and select the project directory. Confirm that Chrome accepts the extension with no error banner (SPEC.md §11 Phase 1, spec: *Extension loads in Chrome without manifest errors*).
+- [x] 8.2 Click the extension action icon in the Chrome toolbar. Confirm the Side Panel opens and displays the "Hello" placeholder text without any JavaScript errors in the DevTools console (spec: *Side panel displays placeholder content*).
+- [x] 8.3 Open the service worker DevTools console (from `chrome://extensions` → "Service Worker" link). Confirm `"SW started"` is logged (spec: *Service worker logs startup message*).
+- [x] 8.4 Confirm the extension icon is visible (not broken/missing) in the Chrome toolbar (spec: *Extension icon appears in Chrome toolbar*).
