@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "ADO to PowerApps Copypaster",
+  "version": "1.0.0",
+  "description": "Transfer Initiative data from Azure DevOps to PowerApps in one click.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://dev.azure.com/*",
+    "https://*.visualstudio.com/*",
+    "https://*.powerapps.com/*",
+    "https://*.dynamics.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "ADO to PA Copypaster",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  }
+}

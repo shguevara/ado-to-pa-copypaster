@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADO to PA Copypaster</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Phase 1 placeholder — replaced in Phase 3 with full Alpine.js tab UI -->
+  <div>Hello</div>
+
+  <!--
+    Alpine.js must be loaded BEFORE app.js so that Alpine.store() and
+    Alpine.data() are available when app.js runs.
+    We use "defer" (not "async") on both scripts:
+      - "defer" guarantees DOM-parsed order and script-order execution.
+      - "async" would allow app.js to execute before alpine.min.js finishes,
+        breaking store registration.
+    Both scripts are local files to comply with Chrome MV3's default CSP,
+    which blocks external script origins without an explicit override.
+  -->
+  <script defer src="../lib/alpine.min.js"></script>
+  <script defer src="./app.js"></script>
+</body>
+</html>
