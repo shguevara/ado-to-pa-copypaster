@@ -1,0 +1,61 @@
+schema: spec-driven
+
+context: |
+  ## Project
+  Chrome Extension (Manifest V3) — "ADO to PowerApps Copypaster"
+  Copies Initiative work item data from Azure DevOps into a PowerApps model-driven app form.
+  Full spec: SPEC.md (v1.0, approved). Implementation plan: SPEC.md §11 (12 phases).
+
+  ## Tech Stack
+  - Extension platform: Chrome MV3, Side Panel API (Chrome 114+)
+  - UI: Alpine.js v3 (local file at lib/alpine.min.js — no CDN, no build step)
+  - Language: Vanilla JS (ES2020+), HTML5, CSS3
+  - Storage: chrome.storage.local (settings/mappings), chrome.storage.session (copied data)
+  - Messaging: chrome.runtime.sendMessage / onMessage (request-response pattern)
+  - Script injection: chrome.scripting.executeScript (on-demand only, no persistent content_scripts)
+  - Tests: Vitest (unit tests for pure logic only — no automated E2E)
+  - Build: None. Extension loaded directly as unpacked from project root.
+
+  ## File Structure
+  manifest.json
+  background/service-worker.js      ← tab detection, message routing, storage ops
+  sidepanel/index.html, app.js, styles.css
+  scripts/ado-reader.js             ← injected into ADO tabs, returns FieldResult[]
+  scripts/pa-writer.js              ← injected into PA tabs, populates form fields
+  scripts/element-picker.js         ← injected into PA tabs, point-and-click selector
+  scripts/selector-tester.js        ← injected into current tab, validates CSS selector
+  lib/alpine.min.js, lib/selector-generator.js
+  assets/icon-16.png, icon-48.png, icon-128.png
+
+  ## Key Data Types
+  - FieldMapping: { id, label, adoSelector, paSelector, fieldType: "text"|"lookup"|"combo-select", enabled }
+  - AppSettings: { mappings: FieldMapping[], overwriteMode: boolean }
+  - CopiedFieldData: { fieldId, label, value, readStatus: "success"|"blank"|"error", readMessage? }
+  - FieldResult: { fieldId, label, status: "success"|"blank"|"warning"|"error"|"skipped", message? }
+
+  ## Critical Business Rules
+  - BR-001: Skip PA fields with existing values when overwriteMode === false
+  - BR-002: One field failure must NOT abort remaining fields — wrap each in try/catch
+  - BR-003: pa-writer.js must NEVER call form.submit(), click Save, or dispatch "submit"
+  - BR-004: Copy/Paste buttons disabled when pageType === "unsupported"
+  - BR-005: On lookup no-match, clear any partially-typed value before returning warning
+  - __URL_ID__ sentinel in adoSelector means extract work item ID from page URL, not from DOM
+
+  ## Conventions
+  - No node_modules, no bundler, no transpilation — everything must run natively in Chrome 114+
+  - lib/selector-generator.js defines window.generateSelector (not an ES module — no export keyword)
+  - All injected scripts wrap all logic in try/catch and return structured results — never throw to host page
+  - Comments explain "why", not "what" — target audience is less-experienced developers
+  - TDD: write failing test first, then implement. Justify any deviation explicitly.
+
+# Per-artifact rules (optional)
+rules:
+  all:
+    - Read SPEC.md in full before creating any artifact. It is the single source of truth for scope, data models, business rules, UI behaviour, and the implementation plan.
+  proposal:
+    - Scope to one implementation phase from SPEC.md §11 at a time
+    - Reference the phase number and goal from SPEC.md in the proposal title
+  tasks:
+    - Each task must be independently verifiable (has a clear done condition)
+    - Reference the relevant SPEC.md section (e.g., §6.2, §7.3) in each task description
+    - Flag any task that touches pa-writer.js with a reminder about BR-003
