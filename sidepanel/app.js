@@ -273,6 +273,28 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       return this.editingMapping ? "Edit Mapping" : "Add Mapping";
     },
 
+    // ── Import message helpers ─────────────────────────────────────────────
+    //
+    // These three methods exist because the Alpine CSP expression parser does
+    // not support &&, optional chaining, or nullish coalescing in directives.
+    // Rather than risk a silent parse failure, we centralise the null-guards
+    // in JS and keep the HTML bindings as trivial method calls. (design D-1)
+
+    // Returns the import message text, or "" when no message is set.
+    getImportMessageText() {
+      return this.importMessage ? this.importMessage.text : "";
+    },
+
+    // Returns true when the current import message is a success message.
+    isImportSuccess() {
+      return !!(this.importMessage && this.importMessage.type === "success");
+    },
+
+    // Returns true when the current import message is an error message.
+    isImportError() {
+      return !!(this.importMessage && this.importMessage.type === "error");
+    },
+
     // ── Admin CRUD — form lifecycle ───────────────────────────────────────
 
     // Open the form in "add new" mode — no mapping is pre-loaded.
@@ -382,6 +404,141 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     setOverwriteMode(value) {
       this.settings = { ...this.settings, overwriteMode: value };
       this._saveSettings();
+    },
+
+    // ── Export — download settings as a JSON file ──────────────────────────
+    //
+    // Reads from the in-memory store (this.settings) rather than issuing a
+    // fresh GET_SETTINGS message.  The store is always in sync with storage
+    // after every SAVE_SETTINGS call, so a storage round-trip adds async
+    // complexity for no correctness benefit.  (design.md Decision 2)
+    //
+    // Blob URL cleanup: createObjectURL allocates a browser-internal resource.
+    // We must call revokeObjectURL() after the click to release that resource.
+    // The temporary <a> element is also removed from the DOM to keep it clean.
+    // (design.md Risks/Trade-offs — Blob URL cleanup)
+    exportMappings() {
+      const exportObj = {
+        version:       "1.0",
+        exportedAt:    new Date().toISOString(),
+        overwriteMode: this.settings?.overwriteMode ?? false,
+        mappings:      this.settings?.mappings ?? [],
+      };
+
+      const json = JSON.stringify(exportObj, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url  = URL.createObjectURL(blob);
+
+      // Trigger a browser file download via a temporary hidden <a> element.
+      // This is the standard cross-browser pattern — no special Chrome APIs needed.
+      const a       = document.createElement("a");
+      a.href        = url;
+      a.download    = "ado-pa-mappings.json";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Release the object URL immediately — the browser has already queued
+      // the download so revoking now is safe and avoids memory leaks.
+      URL.revokeObjectURL(url);
+    },
+
+    // ── Import — read a JSON file and replace settings ─────────────────────
+    //
+    // Async because FileReader is callback-based; we wrap it in a Promise so
+    // the async/await flow is linear and error handling stays in one place.
+    //
+    // Key design points:
+    //   (a) value reset — event.target.value is cleared immediately after
+    //       reading the file reference so re-selecting the same file triggers
+    //       the `change` event again (browsers suppress it if value is unchanged).
+    //       (design.md Decision 3)
+    //   (b) key-presence check — we use `'overwriteMode' in parsed` (not
+    //       truthiness) so `"overwriteMode": false` is correctly applied rather
+    //       than ignored.  (design.md Decision 4)
+    //   (c) message cleared at import start — importMessage is reset to null
+    //       before the file is read, not on a timer, so the user sees their
+    //       last result until they explicitly begin a new import.  (design.md
+    //       Decision 5)
+    async importMappings(event) {
+      const file = event.target.files[0];
+      if (!file) return; // user dismissed the picker — do nothing
+
+      // Reset the input value immediately so the same file can be re-selected
+      // later without the browser suppressing the change event.
+      event.target.value = "";
+
+      // Clear any previous import result at the start of a new attempt.
+      this.importMessage = null;
+
+      // Read the file as text inside a Promise so we can use async/await.
+      let text;
+      try {
+        text = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload  = (e) => resolve(e.target.result);
+          reader.onerror = ()  => reject(new Error("FileReader failed"));
+          reader.readAsText(file);
+        });
+      } catch {
+        this.importMessage = { type: "error", text: "Invalid file: could not read file." };
+        return;
+      }
+
+      // Parse JSON — any syntax error produces the user-facing error message.
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        this.importMessage = { type: "error", text: "Invalid file: could not parse JSON." };
+        return;
+      }
+
+      // Validate the parsed structure against all §4.4 rules.
+      const validationError = validateImportData(parsed);
+      if (validationError) {
+        this.importMessage = { type: "error", text: validationError };
+        return;
+      }
+
+      // Build the new AppSettings object.
+      // overwriteMode: use key-presence check (not truthiness) so that
+      // `"overwriteMode": false` in the import file correctly overrides the
+      // current stored value to false.  (design.md Decision 4)
+      const newSettings = {
+        mappings:      parsed.mappings,
+        overwriteMode: "overwriteMode" in parsed
+          ? parsed.overwriteMode
+          : this.settings.overwriteMode,
+      };
+
+      // Persist the new settings to storage via the background service worker.
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          { action: "SAVE_SETTINGS", settings: newSettings },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.error("[app] importMappings SAVE_SETTINGS error:", chrome.runtime.lastError.message);
+            } else if (!response?.success) {
+              console.error("[app] importMappings SAVE_SETTINGS failed:", response?.error);
+            }
+            resolve();
+          }
+        );
+      });
+
+      // Reload settings from storage to ensure the UI reflects what was saved.
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: "GET_SETTINGS" }, (response) => {
+          if (!chrome.runtime.lastError && response?.settings) {
+            this.settings = response.settings;
+          }
+          resolve();
+        });
+      });
+
+      this.importMessage = { type: "success", text: "Mappings imported successfully." };
     },
 
     // ── Private helper — send SAVE_SETTINGS ───────────────────────────────

@@ -332,15 +332,72 @@
 
       </section><!-- /mapping-section -->
 
-      <!-- ── Export / Import Placeholders (Phase 6) ────────────────────────── -->
+      <!-- ── Export / Import (Phase 6) ────────────────────────────────────── -->
       <!--
-        Task 7.1 — Buttons are visible but non-functional.
-        No @click handler is attached; they do nothing when clicked.
-        Full implementation is deferred to Phase 6.
+        Export — clicking serialises the in-memory settings to §4.4 JSON and
+        triggers a browser download of ado-pa-mappings.json. No page-type guard
+        needed — export works regardless of the active page. (§7.3)
+
+        Import — clicking programmatically triggers the hidden file input.
+        The file picker fires a `change` event which drives the full import
+        flow in $store.app.importMappings. (design.md Decision 3)
+
+        Hidden file input — uses class="visually-hidden" (not display:none)
+        so programmatic .click() is reliably honoured across browsers.
+        x-ref="importFileInput" lets the Import button reach it via $refs
+        without a DOM getElementById call. (§7.3)
+
+        importMessage feedback — shown below the buttons after each import
+        attempt. Green for success, red for errors. Cleared at the start of
+        the next attempt, not on a timer. (design.md Decision 5)
       -->
-      <section class="import-export-bar">
-        <button class="btn btn--secondary" disabled>↓ Export Mappings</button>
-        <button class="btn btn--secondary" disabled>↑ Import Mappings</button>
+      <section class="import-export-section">
+        <div class="import-export-bar">
+          <button
+            class="btn btn--secondary"
+            @click="$store.app.exportMappings()"
+          >↓ Export Mappings</button>
+
+          <button
+            class="btn btn--secondary"
+            @click="$refs.importFileInput.click()"
+          >↑ Import Mappings</button>
+
+          <!--
+            Hidden file input — must NOT use display:none because some browsers
+            do not fire click() on hidden elements. .visually-hidden positions
+            it off-screen (still in layout) so .click() works reliably.
+            accept=".json" filters the picker to JSON files for clarity,
+            though the import flow validates the content regardless.
+          -->
+          <input
+            type="file"
+            accept=".json"
+            x-ref="importFileInput"
+            class="visually-hidden"
+            @change="$store.app.importMappings($event)"
+          />
+        </div>
+
+        <!--
+          Inline import result message.
+          x-show hides the element when importMessage is null (falsy).
+          :class adds the success or error style modifier.
+          x-text sets the message text safely (no innerHTML injection risk).
+
+          Why store helper methods rather than inline expressions?
+            The Alpine CSP expression parser does not support && (logical AND),
+            optional chaining, or nullish coalescing. Wrapping the null-checks
+            in isImportSuccess(), isImportError(), and getImportMessageText()
+            keeps the directives as trivial method calls that the CSP parser
+            handles without issue. (design.md Decision 1)
+        -->
+        <p
+          class="import-message"
+          x-show="$store.app.importMessage"
+          :class="{ 'import-message--success': $store.app.isImportSuccess(), 'import-message--error': $store.app.isImportError() }"
+          x-text="$store.app.getImportMessageText()"
+        ></p>
       </section>
 
     </div><!-- /tab-admin -->
