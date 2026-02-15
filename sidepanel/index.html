@@ -137,7 +137,7 @@
           <input
             type="checkbox"
             class="overwrite-mode-checkbox"
-            :checked="$store.app.settings?.overwriteMode"
+            :checked="$store.app.getOverwriteMode()"
             @change="$store.app.setOverwriteMode($event.target.checked)"
           />
           Overwrite Mode — overwrite existing PA field values during paste
@@ -158,13 +158,13 @@
 
         <!-- Empty-state message — Task 5.3 -->
         <!--
-          Shown when there are no mappings. Uses a null-safe guard
-          ($store.app.settings?.mappings ?? []) because settings may be null
-          while GET_SETTINGS is still in flight on first load.
+          Shown when there are no mappings. Uses getMappings() rather than
+          settings?.mappings because the CSP expression parser does not support
+          optional chaining (?.) or nullish coalescing (??).
         -->
         <p
           class="empty-state"
-          x-show="($store.app.settings?.mappings ?? []).length === 0"
+          x-show="$store.app.getMappings().length === 0"
         >No mappings configured yet. Click + Add Mapping to get started.</p>
 
         <!-- Mapping list — Task 5.2 -->
@@ -174,15 +174,19 @@
           added, removed, or reordered without re-rendering the entire list.
         -->
         <ul class="mapping-list" role="list">
-          <template x-for="mapping in ($store.app.settings?.mappings ?? [])" :key="mapping.id">
+          <template x-for="mapping in $store.app.getMappings()" :key="mapping.id">
             <li class="mapping-row">
 
               <!-- Label + fieldType badge -->
               <div class="mapping-row__info">
                 <span class="mapping-row__label" x-text="mapping.label"></span>
+                <!--
+                  :class uses object syntax with explicit comparisons — template
+                  literals are not supported by the CSP expression parser.
+                -->
                 <span
                   class="badge"
-                  :class="`badge--${mapping.fieldType}`"
+                  :class="{ 'badge--text': mapping.fieldType === 'text', 'badge--lookup': mapping.fieldType === 'lookup', 'badge--choice': mapping.fieldType === 'choice' }"
                   x-text="mapping.fieldType"
                 ></span>
               </div>
@@ -228,20 +232,27 @@
           used x-if, the component would be destroyed and re-created on every
           open, resetting the $watch binding.
 
-          x-data="adminMappingForm()" mounts the local draft state component
-          defined in app.js. This is the CSP-safe way to attach local reactive
-          data without using inline object expressions. (design D-1)
+          x-data="adminMappingForm" mounts the local draft state component
+          registered via Alpine.data() in app.js. The name is referenced without
+          calling parentheses — Alpine.data() handles calling the factory function
+          internally. Using the registered name (not a bare global function call)
+          is required by the CSP build. (design D-1)
         -->
         <div
           class="mapping-form"
           x-show="$store.app.showMappingForm"
-          x-data="adminMappingForm()"
+          x-data="adminMappingForm"
         >
 
           <!-- Form heading — "Add Mapping" or "Edit Mapping" -->
+          <!--
+            Uses getFormTitle() store method rather than an inline ternary so
+            the expression is a trivial method call — no operator ambiguity for
+            the CSP parser.
+          -->
           <h3
             class="mapping-form__heading"
-            x-text="$store.app.editingMapping ? 'Edit Mapping' : 'Add Mapping'"
+            x-text="$store.app.getFormTitle()"
           ></h3>
 
           <!-- Label field -->

@@ -182,6 +182,31 @@ document.addEventListener("alpine:init", () => {
     testSelectorLoading: false,
     importMessage:      null,   // { type: "success"|"error", text } | null
 
+    // ── Admin — read-only helpers for directive expressions ───────────────
+    //
+    // These methods exist purely because the Alpine CSP expression parser does
+    // NOT support optional chaining (?.), nullish coalescing (??), or template
+    // literals.  Wrapping the logic in store methods keeps all null-guards in
+    // JavaScript where they work correctly, and the directive expressions stay
+    // simple method calls that the CSP parser handles without issue.
+
+    // Returns the mappings array, or an empty array if settings hasn't loaded yet.
+    getMappings() {
+      return (this.settings && this.settings.mappings) || [];
+    },
+
+    // Returns the overwriteMode boolean, or false while settings is still null.
+    getOverwriteMode() {
+      return !!(this.settings && this.settings.overwriteMode);
+    },
+
+    // Returns the form heading text — called from x-text in the form panel.
+    // Using a method rather than an inline ternary to keep the HTML expression
+    // trivially simple and unambiguously parseable by the CSP build.
+    getFormTitle() {
+      return this.editingMapping ? "Edit Mapping" : "Add Mapping";
+    },
+
     // ── Admin CRUD — form lifecycle ───────────────────────────────────────
 
     // Open the form in "add new" mode — no mapping is pre-loaded.
@@ -297,6 +322,17 @@ document.addEventListener("alpine:init", () => {
       );
     },
   });
+
+  // ── Register adminMappingForm as an Alpine.data component ─────────────────
+  //
+  // WHY Alpine.data() and NOT a bare global function:
+  //   The Alpine CSP build's expression parser resolves x-data attribute values
+  //   by looking up names in Alpine's own registry, not in window globals.
+  //   `x-data="adminMappingForm"` (without parentheses) works only when the name
+  //   is registered here.  Leaving it as a bare global function causes the
+  //   "Undefined variable: adminMappingForm" error the CSP parser throws when it
+  //   can't resolve the name.  (design D-1; SPEC.md §3.2 CSP constraint)
+  Alpine.data("adminMappingForm", adminMappingForm);
 
   // ── Hydrate pageType from the background service worker ───────────────────
   //
