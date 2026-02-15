@@ -20,9 +20,9 @@
 
 ## 5. Manual Verification
 
-- [ ] 5.1 Reload the unpacked extension. Open Chrome DevTools → Service Worker → verify no console errors on startup.
-- [ ] 5.2 Navigate to an ADO work item URL (`https://dev.azure.com/.../_workitems/edit/...`). In the service worker console, confirm `TAB_CHANGED` with `pageType: "ado"` is dispatched (add a temporary `console.log` if needed, remove after verification).
-- [ ] 5.3 Navigate to a PowerApps / Dynamics URL. Confirm `pageType: "pa"` is dispatched.
-- [ ] 5.4 Navigate to any other page (e.g., google.com). Confirm `pageType: "unsupported"`.
-- [ ] 5.5 Click the extension action icon. Confirm the side panel opens.
-- [ ] 5.6 Remove any temporary `console.log` debug statements added during verification. Keep `console.error` for genuine errors.
+- [x] 5.1 Reload the unpacked extension. Open Chrome DevTools → Service Worker → verify no console errors on startup.
+- [x] 5.2 Navigate to an ADO work item URL (`https://dev.azure.com/.../_workitems/edit/...`). In the service worker console, confirm `TAB_CHANGED` with `pageType: "ado"` is dispatched (add a temporary `console.log` if needed, remove after verification).
+- [x] 5.3 Navigate to a PowerApps / Dynamics URL. Confirm `pageType: "pa"` is dispatched.
+- [x] 5.4 Navigate to any other page (e.g., google.com). Confirm `pageType: "unsupported"`.
+- [x] 5.5 Click the extension action icon. Confirm the side panel opens.
+- [x] 5.6 Remove any temporary `console.log` debug statements added during verification. Keep `console.error` for genuine errors.
