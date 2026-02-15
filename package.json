@@ -1,0 +1,12 @@
+{
+  "name": "ado-to-pa-copypaster",
+  "private": true,
+  "description": "Dev tooling only — the extension itself needs no build step.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}
