@@ -43,23 +43,23 @@
 
 ## 5. Verification (Manual)
 
-- [ ] 5.1 Simulate a clean install: in Chrome DevTools → Application → Storage →
+- [x] 5.1 Simulate a clean install: in Chrome DevTools → Application → Storage →
   `chrome.storage.local`, clear any existing `"settings"` key. Reload the extension
   at `chrome://extensions`. Re-open DevTools storage and confirm the `"settings"` key
   is now present with `overwriteMode: false` and exactly 2 mappings (`"default-title"`
   and `"default-id"`). (spec req: "Clean install writes defaults to storage")
 
-- [ ] 5.2 Without clearing storage, reload the extension again. Confirm the `"settings"`
+- [x] 5.2 Without clearing storage, reload the extension again. Confirm the `"settings"`
   key is unchanged — the two default mappings are still there and no data was reset.
   (spec req: "Developer reload does not overwrite existing settings", design D-2)
 
-- [ ] 5.3 Open the service worker's DevTools console (`chrome://extensions` → "inspect"
+- [x] 5.3 Open the service worker's DevTools console (`chrome://extensions` → "inspect"
   on the service worker). Run:
   `chrome.runtime.sendMessage({ action: "GET_SETTINGS" }, console.log)`.
   Confirm the response is `{ settings: { overwriteMode: false, mappings: [...] } }`
   with the 2 default mappings. (spec req: "GET_SETTINGS returns current AppSettings")
 
-- [ ] 5.4 In the same console, run:
+- [x] 5.4 In the same console, run:
   `chrome.runtime.sendMessage({ action: "SAVE_SETTINGS", settings: { mappings: [], overwriteMode: true } }, console.log)`.
   Confirm the response is `{ success: true }`. Then run `GET_SETTINGS` again and
   confirm the response reflects `overwriteMode: true` and an empty `mappings` array.
