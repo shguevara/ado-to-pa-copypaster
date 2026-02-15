@@ -74,12 +74,10 @@ function adminMappingForm() {
         const editing = this.$store.app.editingMapping;
         if (editing) {
           // Edit mode — pre-populate from the shallow copy placed by openEditForm().
-          // "fieldSchemaName" in the form maps to "paSelector" in the stored
-          // FieldMapping — the UI calls it "Field Schema Name (PA)".
-          this.label           = editing.label          ?? "";
-          this.adoSelector     = editing.adoSelector    ?? "";
-          this.fieldSchemaName = editing.paSelector     ?? "";
-          this.fieldType       = editing.fieldType      ?? "text";
+          this.label           = editing.label           ?? "";
+          this.adoSelector     = editing.adoSelector     ?? "";
+          this.fieldSchemaName = editing.fieldSchemaName ?? "";
+          this.fieldType       = editing.fieldType       ?? "text";
         } else {
           // Add mode — blank all fields.
           this.label           = "";
@@ -122,13 +120,12 @@ function adminMappingForm() {
       }
 
       // Validation passed — delegate to the store.
-      // We pass paSelector (the storage key name) mapped from our local
-      // fieldSchemaName display name. The store assigns the id for add mode.
+      // The store assigns the id for add mode (undefined here means "new mapping").
       this.$store.app.saveMapping({
         id:              this.$store.app.editingMapping?.id,  // undefined in add mode
         label:           this.label.trim(),
         adoSelector:     this.adoSelector.trim(),
-        paSelector:      this.fieldSchemaName.trim(),         // UI name → storage key
+        fieldSchemaName: this.fieldSchemaName.trim(),
         fieldType:       this.fieldType,
       });
     },
@@ -237,7 +234,7 @@ document.addEventListener("alpine:init", () => {
 
     // Persist a new or updated mapping, then close the form.
     //
-    // formData shape: { id?, label, adoSelector, paSelector, fieldType }
+    // formData shape: { id?, label, adoSelector, fieldSchemaName, fieldType }
     // - id present  → edit mode: replace the mapping in-place.
     // - id absent   → add mode: generate a UUID, set enabled:true, append.
     //
@@ -248,7 +245,15 @@ document.addEventListener("alpine:init", () => {
     saveMapping(formData) {
       // Safety guard — should never be reached because adminMappingForm.save()
       // validates first, but defensive programming prevents silent data corruption.
-      if (!formData.label?.trim() || !formData.paSelector?.trim()) return;
+      // All four required fields (SPEC.md §4.1) are checked here so that any
+      // future caller (test harness, Phase 10 script, etc.) cannot persist an
+      // incomplete or invalid mapping. (design D-5)
+      if (
+        !formData.label?.trim()           ||
+        !formData.fieldSchemaName?.trim() ||
+        !formData.adoSelector?.trim()     ||
+        !["text", "lookup", "choice"].includes(formData.fieldType)
+      ) return;
 
       const mappings = [...(this.settings?.mappings ?? [])];
 
@@ -283,6 +288,15 @@ document.addEventListener("alpine:init", () => {
 
       const mappings = (this.settings?.mappings ?? []).filter((m) => m.id !== id);
       this.settings = { ...this.settings, mappings };
+
+      // If the form is open for the mapping that was just deleted, close it.
+      // Without this guard, showMappingForm stays true and editingMapping holds
+      // a stale shallow copy of the deleted entry — the user would see an open
+      // form for a ghost mapping. (COMMENTS.md §Should Fix)
+      if (this.editingMapping?.id === id) {
+        this.closeForm();
+      }
+
       this._saveSettings();
     },
 
