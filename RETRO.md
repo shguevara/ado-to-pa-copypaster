@@ -1,3 +1,97 @@
+# Retrospective — Phase 5: Admin Tab CRUD
+
+**Date**: 2026-02-15
+**Commits**: `b7a1d1e` (impl) → `ffb9349` (fix) → `003b8c8` (done)
+
+---
+
+## What went wrong
+
+Two classes of bugs required a fix commit after the initial implementation.
+Both were caught on the first manual verification pass (task 10.1).
+
+---
+
+### Bug 1 — `?.`, `??`, and template literals are not supported in Alpine CSP directive expressions
+
+**Symptom**: On first load of the Admin tab, the mapping list was blank (no "Title" or
+"Initiative ID" rows), and the DevTools console showed:
+
+```
+Uncaught Error: CSP Parser Error: Unexpected token: PUNCTUATION "."
+```
+
+**Root cause**: The Alpine CSP build replaces `new AsyncFunction` with a hand-written
+expression parser. That parser does not implement optional chaining (`?.`), nullish
+coalescing (`??`), or template literals. Three directive expressions triggered it:
+
+- `:checked="$store.app.settings?.overwriteMode"` — `?.` on `settings`
+- `x-show="($store.app.settings?.mappings ?? []).length === 0"` — `?.` and `??`
+- `x-for="mapping in ($store.app.settings?.mappings ?? [])"` — same
+- `:class="\`badge--${mapping.fieldType}\`"` — template literal
+
+Because `settings` starts as `null` while `GET_SETTINGS` is in flight, the null guard
+felt necessary inline. The correct approach is to push the guard into a JavaScript
+store method where the full language is available, and expose a plain method call to
+the HTML.
+
+**Fix**: Added `getMappings()` and `getOverwriteMode()` store methods that do the
+null-guarding in JS and return a safe value. Replaced the template-literal `:class`
+with object-syntax using three explicit `===` comparisons.
+
+**Action**: The Alpine CSP expression parser supports: property access, method calls,
+comparison operators (`===`, `!==`, `<`, etc.), logical operators (`&&`, `||`, `!`),
+ternary (`? :`), string/number/boolean literals, array and object literals.
+It does **not** support: `?.`, `??`, template literals, arrow functions, `new`, spread.
+When a directive needs null-safety or dynamic string construction, move the logic into
+a store method or `x-data` component method — never inline it.
+
+---
+
+### Bug 2 — `adminMappingForm` not registered with `Alpine.data()`, and wrong `x-data` call syntax
+
+**Symptom**: Every property in the mapping form component was undefined:
+
+```
+Uncaught Error: Undefined variable: adminMappingForm
+Uncaught Error: Undefined variable: label
+Uncaught Error: Undefined variable: adoSelector
+Uncaught Error: Undefined variable: fieldSchemaName
+```
+
+**Root cause**: Two mistakes compounded each other.
+
+1. `adminMappingForm` was defined as a plain global function in `app.js` but never
+   registered with `Alpine.data()`. The Alpine CSP build resolves `x-data` attribute
+   values from Alpine's own registry — it does not look in `window` globals. So
+   `x-data="adminMappingForm()"` produced "Undefined variable: adminMappingForm".
+
+2. Even if the function were resolvable, `x-data="adminMappingForm()"` is wrong syntax
+   when using `Alpine.data()`. When a component is registered via `Alpine.data('name', fn)`,
+   it is referenced in HTML as `x-data="name"` (the name string, without parentheses).
+   Alpine calls the factory function internally. Writing `name()` asks the CSP parser to
+   call a function, which it cannot do for a name it doesn't know.
+
+**Fix**: Added `Alpine.data('adminMappingForm', adminMappingForm)` inside the
+`alpine:init` callback, and changed `x-data="adminMappingForm()"` to
+`x-data="adminMappingForm"`.
+
+**Action**: Any `x-data` component function used in HTML must be registered via
+`Alpine.data('name', fn)` inside `alpine:init`. Reference it in HTML as `x-data="name"`
+(no parentheses). This is a hard rule in the CSP build — bare global functions are
+invisible to the expression parser.
+
+---
+
+## Summary table
+
+| # | What went wrong | Root cause | Fix | Action going forward |
+|---|---|---|---|---|
+| 1 | Mapping list blank, CSP parser error on `?.` / `??` / template literal | CSP expression parser does not support these operators | Add store helper methods (`getMappings`, `getOverwriteMode`); use object-syntax `:class` | Push null-guards and string construction into JS methods; keep directive expressions to simple property access and method calls |
+| 2 | `adminMappingForm` and all local data properties undefined | Not registered via `Alpine.data()`; wrong `x-data="name()"` syntax | `Alpine.data('adminMappingForm', adminMappingForm)` + `x-data="adminMappingForm"` | Always register `x-data` component functions with `Alpine.data()` inside `alpine:init`; reference by name only, no parentheses |
+
+---
+
 # Retrospective — Phase 4: Storage & Settings Foundation
 
 **Date**: 2026-02-15
