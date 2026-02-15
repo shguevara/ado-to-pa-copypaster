@@ -105,4 +105,68 @@ describe("validateImportData", () => {
     expect(validateImportData(minimal)).toBe(null);
   });
 
+  // ── 1.9–1.12 — remaining required-field coverage (§9.2: 100% coverage) ──
+  //
+  // SPEC.md §9.2 requires 100% validation rule coverage.  Tests 1.5/1.6
+  // already exercise the REQUIRED_FIELDS loop for fieldSchemaName and label;
+  // these four cover the remaining entries: id, adoSelector, fieldType
+  // (absent key — distinct from 1.7's invalid value), and enabled.
+  //
+  // Because validateImportData uses a deterministic `for...of` loop over
+  // REQUIRED_FIELDS, any single-field removal exercises the same code path.
+  // The tests here confirm that each field name is in the REQUIRED_FIELDS
+  // array and that the error string is interpolated correctly for each one.
+
+  // ── 1.9 — missing id ─────────────────────────────────────────────────────
+  it("returns the 'missing required field' error for a mapping entry without id", () => {
+    const { id: _removed, ...noId } = validMapping;
+    expect(validateImportData({ mappings: [noId] })).toBe(
+      "Invalid mapping entry: missing required field 'id'."
+    );
+  });
+
+  // ── 1.10 — missing adoSelector ───────────────────────────────────────────
+  it("returns the 'missing required field' error for a mapping entry without adoSelector", () => {
+    const { adoSelector: _removed, ...noAdoSelector } = validMapping;
+    expect(validateImportData({ mappings: [noAdoSelector] })).toBe(
+      "Invalid mapping entry: missing required field 'adoSelector'."
+    );
+  });
+
+  // ── 1.11 — fieldType key absent (Rule 3 — distinct from Rule 4 in 1.7) ──
+  it("returns the 'missing required field' error for a mapping entry without fieldType key", () => {
+    // Test 1.7 passes fieldType: "dropdown" (key present, value invalid) so
+    // Rule 4 fires.  Here fieldType is absent entirely — Rule 3 fires first
+    // before the VALID_FIELD_TYPES check is ever reached.
+    const { fieldType: _removed, ...noFieldType } = validMapping;
+    expect(validateImportData({ mappings: [noFieldType] })).toBe(
+      "Invalid mapping entry: missing required field 'fieldType'."
+    );
+  });
+
+  // ── 1.12 — missing enabled ───────────────────────────────────────────────
+  it("returns the 'missing required field' error for a mapping entry without enabled", () => {
+    const { enabled: _removed, ...noEnabled } = validMapping;
+    expect(validateImportData({ mappings: [noEnabled] })).toBe(
+      "Invalid mapping entry: missing required field 'enabled'."
+    );
+  });
+
+  // ── 1.13 — label is empty string ─────────────────────────────────────────
+  //
+  // SPEC.md §4.4 defines label as a "non-empty string".  An entry with
+  // label: "" has the key present (so `in` succeeds) and is not null/undefined
+  // (so `== null` succeeds), but it is semantically missing — a blank label
+  // produces a mapping with no visible name in the UI.
+  //
+  // The guard `entry[field] === ""` catches this case.  The error message
+  // re-uses "missing required field" because the intent is the same: the field
+  // value is absent/unusable.
+  it("returns the 'missing required field' error for a mapping entry with an empty-string label", () => {
+    const emptyLabel = { ...validMapping, label: "" };
+    expect(validateImportData({ mappings: [emptyLabel] })).toBe(
+      "Invalid mapping entry: missing required field 'label'."
+    );
+  });
+
 });

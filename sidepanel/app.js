@@ -50,12 +50,15 @@ function validateImportData(parsed) {
   const VALID_FIELD_TYPES = ["text", "lookup", "choice"];
 
   for (const entry of parsed.mappings) {
-    // Rule 3: every required field must be present and non-null.
-    // Why use the `in` operator plus a null check?
-    //   `in` catches a completely absent key.  `== null` catches explicit null
-    //   or undefined values.  Together they cover every "missing" case.
+    // Rule 3: every required field must be present, non-null, and non-empty.
+    // Why three conditions?
+    //   `!(field in entry)` catches a completely absent key.
+    //   `== null` catches explicit null or undefined values.
+    //   `=== ""` catches empty strings — SPEC.md §4.4 defines string fields
+    //   (e.g. label) as "non-empty string", so "" is as invalid as null.
+    //   `enabled` is boolean (true/false) so the "" check never fires on it.
     for (const field of REQUIRED_FIELDS) {
-      if (!(field in entry) || entry[field] == null) {
+      if (!(field in entry) || entry[field] == null || entry[field] === "") {
         return `Invalid mapping entry: missing required field '${field}'.`;
       }
     }
@@ -514,19 +517,39 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       };
 
       // Persist the new settings to storage via the background service worker.
+      //
+      // Why a `saveSucceeded` flag rather than reject()?
+      //   We want to stay in the async/await flow (no try/catch around the
+      //   Promise constructor) and still distinguish success from failure after
+      //   the await.  Capturing the outcome in a closure variable keeps the
+      //   callback-style chrome.runtime.sendMessage compatible with async/await
+      //   without wrapping errors as rejections — same pattern used in
+      //   addMapping() and saveSettings(). (SPEC.md §8.5)
+      let saveSucceeded = true;
       await new Promise((resolve) => {
         chrome.runtime.sendMessage(
           { action: "SAVE_SETTINGS", settings: newSettings },
           (response) => {
             if (chrome.runtime.lastError) {
+              saveSucceeded = false;
               console.error("[app] importMappings SAVE_SETTINGS error:", chrome.runtime.lastError.message);
             } else if (!response?.success) {
+              saveSucceeded = false;
               console.error("[app] importMappings SAVE_SETTINGS failed:", response?.error);
             }
             resolve();
           }
         );
       });
+
+      // Guard: if the save failed, surface an inline error (SPEC.md §8.5).
+      // Do NOT show "success" — the settings in storage are unchanged, so
+      // continuing would leave the mapping list untouched while displaying a
+      // misleading "Mappings imported successfully." message.
+      if (!saveSucceeded) {
+        this.importMessage = { type: "error", text: "Failed to save settings. Please try again." };
+        return;
+      }
 
       // Reload settings from storage to ensure the UI reflects what was saved.
       await new Promise((resolve) => {
