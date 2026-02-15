@@ -55,6 +55,13 @@ document.addEventListener("alpine:init", () => {
     // ── Navigation ────────────────────────────────────────────────────────
     activeTab: "user",          // "user" | "admin"
 
+    // setTab is a method rather than a direct property assignment because the
+    // Alpine CSP build's expression parser does not support assignment through
+    // magic property chains ($store.app.x = y) in event handler expressions.
+    // Method calls are fully supported, so @click="$store.app.setTab('admin')"
+    // is the correct pattern when using the CSP build.
+    setTab(tab) { this.activeTab = tab; },
+
     // ── Page context ──────────────────────────────────────────────────────
     // Default is "unsupported" so buttons stay disabled until the service
     // worker confirms the actual page type via GET_PAGE_CONTEXT (below).

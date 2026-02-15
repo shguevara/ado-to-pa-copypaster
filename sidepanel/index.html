@@ -47,15 +47,15 @@
         role="tab"
         class="tab-btn"
         :class="{ 'tab-btn--active': $store.app.activeTab === 'user' }"
-        :aria-selected="String($store.app.activeTab === 'user')"
-        @click="$store.app.activeTab = 'user'"
+        :aria-selected="$store.app.activeTab === 'user'"
+        @click="$store.app.setTab('user')"
       >User</button>
       <button
         role="tab"
         class="tab-btn"
         :class="{ 'tab-btn--active': $store.app.activeTab === 'admin' }"
-        :aria-selected="String($store.app.activeTab === 'admin')"
-        @click="$store.app.activeTab = 'admin'"
+        :aria-selected="$store.app.activeTab === 'admin'"
+        @click="$store.app.setTab('admin')"
       >Admin</button>
     </nav>
 
