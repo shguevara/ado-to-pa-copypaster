@@ -100,6 +100,7 @@ document.addEventListener("alpine:init", () => {
       // "unsupported", which is the correct safe default.
       return;
     }
+    // spec guarantees pageType is always "ado"|"pa"|"unsupported" — all truthy
     if (response?.pageType) {
       Alpine.store("app").pageType = response.pageType;
     }

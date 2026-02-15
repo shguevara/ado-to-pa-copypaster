@@ -65,6 +65,7 @@
       This preserves the field-results list when the user briefly switches to
       Admin and returns — no re-fetch needed. (design D-5)
     -->
+    <!-- No x-cloak: User tab is the default — it starts visible, no flash possible -->
     <div id="tab-user" role="tabpanel" aria-label="User" x-show="$store.app.activeTab === 'user'">
 
       <!-- Page Context Banner ─────────────────────────────────────────────── -->
