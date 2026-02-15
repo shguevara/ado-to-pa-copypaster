@@ -28,10 +28,10 @@
 
 ## 5. Verification (Manual)
 
-- [ ] 5.1 Reload the extension at `chrome://extensions` → "Load unpacked". Open the side panel. Confirm zero `console.error` entries in both the side panel's DevTools console and the service worker's DevTools console (spec req: "Side panel loads without console errors").
+- [x] 5.1 Reload the extension at `chrome://extensions` → "Load unpacked". Open the side panel. Confirm zero `console.error` entries in both the side panel's DevTools console and the service worker's DevTools console (spec req: "Side panel loads without console errors").
 
-- [ ] 5.2 Verify the "User" tab is active by default. Click "Admin" — confirm the Admin panel appears and User panel disappears. Click "User" — confirm the reverse. No page reload required between switches (spec req: "Tab navigation renders and switches correctly").
+- [x] 5.2 Verify the "User" tab is active by default. Click "Admin" — confirm the Admin panel appears and User panel disappears. Click "User" — confirm the reverse. No page reload required between switches (spec req: "Tab navigation renders and switches correctly").
 
-- [ ] 5.3 Open the side panel while on an ADO work item page (`dev.azure.com/.../workitems/...`). Confirm the banner shows the blue dot and "Azure DevOps Initiative detected. Ready to copy." Repeat on a PowerApps page (green dot + PA message) and on `google.com` (grey dot + unsupported message) (spec req: "Page context banner reflects current pageType", SPEC.md §7.2).
+- [x] 5.3 Open the side panel while on an ADO work item page (`dev.azure.com/.../workitems/...`). Confirm the banner shows the blue dot and "Azure DevOps Initiative detected. Ready to copy." Repeat on a PowerApps page (green dot + PA message) and on `google.com` (grey dot + unsupported message) (spec req: "Page context banner reflects current pageType", SPEC.md §7.2).
 
-- [ ] 5.4 With the side panel open, switch between an ADO tab, a PA tab, and an unrelated tab. Confirm the banner updates for each switch without requiring the side panel to be closed and reopened (spec req: "pageType updated reactively on TAB_CHANGED push", SPEC.md §6.1).
+- [x] 5.4 With the side panel open, switch between an ADO tab, a PA tab, and an unrelated tab. Confirm the banner updates for each switch without requiring the side panel to be closed and reopened (spec req: "pageType updated reactively on TAB_CHANGED push", SPEC.md §6.1).
