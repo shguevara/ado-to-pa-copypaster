@@ -149,24 +149,27 @@ async function updatePageType(tabId) {
 
 if (typeof chrome !== "undefined") {
   // ── First-install seed ─────────────────────────────────────────────────────
-  // Write DEFAULT_SETTINGS to storage the first time the extension is installed.
+  // Seed DEFAULT_SETTINGS into chrome.storage.local if it is not already set.
   //
-  // Why read before write? (design D-2)
-  // We cannot rely solely on `reason === "install"` to guard against clobbering
-  // user data: a user who uninstalls, exports their settings, then reinstalls
-  // would have reason === "install" but should not lose their saved configuration.
-  // Reading storage first and skipping the write if data exists is safe in all
-  // scenarios — clean install, extension update, developer reload, and reinstall.
-  chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-    if (reason !== "install") return;
-
+  // Why we do NOT filter by reason:
+  //   Chrome fires onInstalled with reason "update" — not "install" — when you
+  //   click the Reload button at chrome://extensions on an unpacked extension.
+  //   Filtering to reason === "install" only would mean "clear storage + reload"
+  //   never re-seeds the defaults, breaking the developer verification workflow.
+  //
+  //   The read-before-write guard below is the ONLY protection we need:
+  //     - Storage empty  → write defaults  (first install, or post-clear reload)
+  //     - Storage has data → skip           (normal update, reload with existing data)
+  //   This is safe for every scenario: clean install, update, reinstall, developer
+  //   reload with data, and developer reload after manual clear. (design D-2)
+  chrome.runtime.onInstalled.addListener(async () => {
     try {
       const result = await chrome.storage.local.get("settings");
       if (result.settings == null) {
-        // Storage is empty — this is a genuine clean install.
+        // Storage is empty — seed factory defaults.
         await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
       }
-      // If result.settings is already set, we skip the write to preserve user data.
+      // result.settings is already set → skip to preserve existing user data.
     } catch (err) {
       console.error("[SW] onInstalled: failed to seed default settings:", err);
     }
