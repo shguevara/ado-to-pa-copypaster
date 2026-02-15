@@ -27,8 +27,14 @@
   <script defer src="../lib/alpine.min.js"></script>
 
   <!-- ── Root application wrapper ──────────────────────────────────────────── -->
-  <!-- All Alpine directives live inside #app. -->
-  <div id="app">
+  <!--
+    x-data="" is required to activate Alpine.js on this element and all its
+    descendants. Without x-data in scope, Alpine ignores every directive in the
+    DOM — x-show stays inert, @click handlers never fire, :class bindings are
+    never evaluated.  An empty x-data creates a component scope that still gives
+    full access to $store.app via Alpine's global store mechanism.
+  -->
+  <div id="app" x-data>
 
     <!-- ── Tab Bar (SPEC.md §7.1) ───────────────────────────────────────────── -->
     <!--
@@ -116,7 +122,13 @@
         Phase 8:  Element picker integration
         Phase 9:  Test Selector integration
     -->
-    <div id="tab-admin" role="tabpanel" aria-label="Admin" x-show="$store.app.activeTab === 'admin'">
+    <!--
+      x-cloak prevents the admin panel from briefly flashing visible before
+      Alpine initialises and applies x-show. The [x-cloak] CSS rule sets
+      display:none immediately at parse time; Alpine removes the attribute
+      once it has evaluated the x-show expression.
+    -->
+    <div id="tab-admin" role="tabpanel" aria-label="Admin" x-show="$store.app.activeTab === 'admin'" x-cloak>
       <p class="placeholder-msg">⚙ Admin settings — coming in Phase 5.</p>
     </div><!-- /tab-admin -->
 

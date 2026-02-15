@@ -4,6 +4,16 @@
    Later phases add styles to the placeholder sections at the bottom of this file.
    ============================================================================= */
 
+/* ─── Alpine.js Cloak ──────────────────────────────────────────────────────── */
+/*
+   [x-cloak] is set by the developer in HTML on elements that should start
+   hidden.  Alpine removes this attribute once it has initialised and evaluated
+   the element's x-show expression.  Without this CSS rule the attribute has no
+   effect and the element would flash visible before Alpine hides it.
+   !important is required so this rule beats any other display declarations.
+*/
+[x-cloak] { display: none !important; }
+
 /* ─── Base Reset & Layout ──────────────────────────────────────────────────── */
 
 *,
