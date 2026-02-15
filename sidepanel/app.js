@@ -1,5 +1,5 @@
 /**
- * Side Panel Application — Phase 5: Admin Tab CRUD
+ * Side Panel Application — Phase 6: Export / Import
  *
  * Script loading contract (enforced in index.html):
  *   <script src="app.js">                      ← synchronous, runs immediately
@@ -12,7 +12,65 @@
  *   (x-show, :class, etc.) in index.html.  If app.js ran after Alpine, the
  *   'alpine:init' event would have already fired and the store would never be
  *   registered — every Alpine binding would silently reference undefined.
+ *
+ * Node.js / Vitest compatibility:
+ *   validateImportData is a module-scope pure function exported via a
+ *   conditional `module.exports` guard at the bottom (same pattern as
+ *   detectPageType in service-worker.js).  Chrome and DOM API calls are
+ *   wrapped in `typeof` guards so the file can be imported in Node.js
+ *   without any mocks.
  */
+
+// ─── Import validation — module-scope pure function ───────────────────────────
+//
+// Why at module scope rather than inside the Alpine store?
+//   Functions defined inside Alpine.store(...) closures are not importable
+//   from Node.js (the store is created inside a browser event callback).
+//   Keeping this as a plain module-level function lets Vitest import and
+//   unit-test it without any browser or Alpine mocking. (design.md Decision 1)
+//
+// @param {unknown} parsed - The parsed JSON value from the imported file.
+// @returns {null} on success — all §4.4 validation rules passed.
+// @returns {string} on failure — the first failing rule's error message.
+function validateImportData(parsed) {
+  // Rule 1: the root must have a `mappings` key that is an array.
+  // null/undefined input also fails here (no `mappings` property at all).
+  if (!parsed || !Array.isArray(parsed.mappings)) {
+    return "Invalid format: 'mappings' array is required.";
+  }
+
+  // Rule 2: the mappings array must have at least one entry.
+  // An empty export file is meaningless and likely a mistake.
+  if (parsed.mappings.length === 0) {
+    return "Invalid format: 'mappings' array must not be empty.";
+  }
+
+  // Rules 3 + 4: per-entry validation — check every mapping in order.
+  const REQUIRED_FIELDS = ["id", "label", "adoSelector", "fieldSchemaName", "fieldType", "enabled"];
+  const VALID_FIELD_TYPES = ["text", "lookup", "choice"];
+
+  for (const entry of parsed.mappings) {
+    // Rule 3: every required field must be present and non-null.
+    // Why use the `in` operator plus a null check?
+    //   `in` catches a completely absent key.  `== null` catches explicit null
+    //   or undefined values.  Together they cover every "missing" case.
+    for (const field of REQUIRED_FIELDS) {
+      if (!(field in entry) || entry[field] == null) {
+        return `Invalid mapping entry: missing required field '${field}'.`;
+      }
+    }
+
+    // Rule 4: fieldType must be one of the three valid values.
+    // Checked after the required-fields loop because fieldType must first
+    // exist (rule 3) before we can meaningfully validate its value.
+    if (!VALID_FIELD_TYPES.includes(entry.fieldType)) {
+      return `Invalid fieldType in mapping '${entry.label}': must be text, lookup, or choice.`;
+    }
+  }
+
+  // All rules passed — the data is safe to apply to storage.
+  return null;
+}
 
 // ─── TAB_CHANGED push handler ─────────────────────────────────────────────────
 //
@@ -24,17 +82,25 @@
 //   Alpine finishing its init, a TAB_CHANGED message could arrive.  Registering
 //   the listener here means we never miss that message.  The guard below handles
 //   the case where the store hasn't been created yet.
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.action !== "TAB_CHANGED") return;
+//
+// Why the `typeof chrome !== "undefined"` guard?
+//   When Node.js imports this file for Vitest tests, `chrome` is not defined.
+//   The guard is a no-op in the real extension (chrome is always defined there)
+//   but prevents a ReferenceError that would abort the import in test runs.
+//   Same pattern as service-worker.js. (design.md Decision 1)
+if (typeof chrome !== "undefined") {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action !== "TAB_CHANGED") return;
 
-  // Guard: if Alpine hasn't registered the store yet (extremely unlikely but
-  // possible in theory), drop this message safely.  The next tab-switch event
-  // will re-sync pageType; no persistent stale state is introduced.
-  const store = Alpine.store("app");
-  if (!store) return;
+    // Guard: if Alpine hasn't registered the store yet (extremely unlikely but
+    // possible in theory), drop this message safely.  The next tab-switch event
+    // will re-sync pageType; no persistent stale state is introduced.
+    const store = Alpine.store("app");
+    if (!store) return;
 
-  store.pageType = message.pageType;
-});
+    store.pageType = message.pageType;
+  });
+}
 
 // ─── adminMappingForm() — local x-data component for the mapping form ─────────
 //
@@ -137,8 +203,11 @@ function adminMappingForm() {
 // 'alpine:init' fires once, synchronously, during Alpine's startup — after
 // Alpine is available on window but before it walks the DOM.  This is the
 // correct place to register stores (Alpine.js docs §Stores).
-
-document.addEventListener("alpine:init", () => {
+//
+// Wrapped in `typeof document !== "undefined"` so that Node.js (Vitest) can
+// import this file without hitting a ReferenceError — document does not exist
+// in Node.  In the real browser extension, document is always defined.
+if (typeof document !== "undefined") document.addEventListener("alpine:init", () => {
 
   // ── Register the global application store ─────────────────────────────────
   //
@@ -390,4 +459,11 @@ document.addEventListener("alpine:init", () => {
     }
   });
 
-});
+}); // end alpine:init
+
+// ─── Test Export ──────────────────────────────────────────────────────────────
+// Allow unit tests (Vitest / Node.js) to import validateImportData without a
+// browser runtime.  The guard ensures this line is a no-op when loaded by Chrome
+// (Chrome's module system does not expose `module`).
+// Same pattern as detectPageType in service-worker.js. (design.md Decision 1)
+if (typeof module !== "undefined") module.exports = { validateImportData };
