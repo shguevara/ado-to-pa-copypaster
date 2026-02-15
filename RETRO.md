@@ -1,3 +1,78 @@
+# Retrospective — Phase 4: Storage & Settings Foundation
+
+**Date**: 2026-02-15
+**Commits**: `4859914` (impl) → `f622d19` (fix) → `d7a5c1d` (done)
+
+---
+
+## What went wrong
+
+Two issues required correction after the initial implementation.
+Both were caught during manual verification (tasks 5.1–5.4).
+
+---
+
+### Bug 1 — `onInstalled` reason filter blocked seeding on developer reload
+
+**Symptom**: After clearing `"settings"` from `chrome.storage.local` and reloading
+the extension via the Reload button at `chrome://extensions`, the `"settings"` key
+remained absent from storage. Task 5.1 produced an empty storage view.
+
+**Root cause**: The initial implementation guarded the seed with
+`if (reason !== "install") return;`. Chrome fires `onInstalled` with
+`reason === "update"` — not `"install"` — when you click the Reload button on an
+unpacked extension. The design document (D-2) noted that `reason === "install"` was
+the expected value but acknowledged Chrome's behaviour may differ. The spec's own
+scenario ("Developer reload does not overwrite existing settings") was written to
+cover the *non-empty storage* case; the *empty storage after manual clear* case was
+not explicitly considered.
+
+**Fix**: Removed the reason check entirely. The read-before-write storage guard
+(`result.settings == null`) is the only protection needed and handles all scenarios
+correctly:
+- Storage empty → write defaults (first install, post-clear reload)
+- Storage has data → skip (normal update, reload with existing data, reinstall)
+
+**Action**: Do not filter `onInstalled` by reason when the intent is "seed if empty".
+The reason only matters if you want different behaviour per event type (e.g. a
+migration on update). For a simple "write defaults if absent" pattern, read storage
+first and let the data be the guard — not the event metadata.
+
+---
+
+### Bug 2 — Task 5.3/5.4 instructions directed to the wrong console
+
+**Symptom**: Running `chrome.runtime.sendMessage({ action: "GET_SETTINGS" }, console.log)`
+from the service worker's DevTools console returned `undefined` — no response arrived
+— even though `chrome.storage.local` clearly held the correct `"settings"` value.
+
+**Root cause**: Chrome does not route `chrome.runtime.sendMessage` back to the context
+that sent the message. The service worker's `onMessage` listener never fires for a
+message originating in the same context. The task description said "Open the service
+worker's DevTools console" — which causes a self-send that the SW ignores — rather
+than using a different extension context as the sender.
+
+**Fix**: Ran the same commands from the **side panel's** DevTools console
+(right-click inside the side panel → Inspect). Messages sent from the side panel
+travel to the service worker over the normal inter-context channel, the `onMessage`
+listener fires, and the response arrives correctly.
+
+**Action**: When manually testing service worker message handlers, always send from
+a separate extension context (side panel, popup, options page). The service worker
+console is useful for inspecting state and calling Chrome APIs directly, but it is
+the wrong sender for testing `onMessage` handlers.
+
+---
+
+## Summary table
+
+| # | What went wrong | Root cause | Fix | Action going forward |
+|---|---|---|---|---|
+| 1 | Storage not seeded after clear + reload | `reason === "update"` on developer reload skipped the guard | Remove reason filter; rely solely on `result.settings == null` | For "seed if absent" patterns, use storage state as the guard — not `onInstalled` reason |
+| 2 | `GET_SETTINGS` returned `undefined` from SW console | Chrome does not route `sendMessage` back to the sender context | Run test commands from side panel console instead | Always test `onMessage` handlers by sending from a different extension context |
+
+---
+
 # Retrospective — Phase 3: Side Panel Shell & Navigation
 
 **Date**: 2026-02-15
