@@ -66,22 +66,22 @@
 
 ## 10. Manual Verification (spec: admin-mapping-crud; SPEC.md §9.3)
 
-- [ ] 10.1 Load extension in Chrome. Open Admin tab. Verify two default mappings ("Title", "Initiative ID") are visible with correct type badges. Verify Overwrite Mode checkbox is unchecked.
+- [x] 10.1 Load extension in Chrome. Open Admin tab. Verify two default mappings ("Title", "Initiative ID") are visible with correct type badges. Verify Overwrite Mode checkbox is unchecked.
 
-- [ ] 10.2 Click "+ Add Mapping". Fill in all fields. Click "Save". Verify new row appears at bottom of list. Close and reopen panel — verify new mapping persists.
+- [x] 10.2 Click "+ Add Mapping". Fill in all fields. Click "Save". Verify new row appears at bottom of list. Close and reopen panel — verify new mapping persists.
 
-- [ ] 10.3 Click "Edit" on an existing mapping. Verify form pre-populates. Change the label. Click "Save". Verify list row shows new label, id and position are unchanged, and persistence survives panel reload.
+- [x] 10.3 Click "Edit" on an existing mapping. Verify form pre-populates. Change the label. Click "Save". Verify list row shows new label, id and position are unchanged, and persistence survives panel reload.
 
-- [ ] 10.4 Click "Edit" on a mapping, change a field, then click "Cancel". Verify the original values are unchanged in the list.
+- [x] 10.4 Click "Edit" on a mapping, change a field, then click "Cancel". Verify the original values are unchanged in the list.
 
-- [ ] 10.5 Click "Delete" on a mapping. Dismiss the confirm dialog. Verify mapping still present. Click "Delete" again, confirm. Verify mapping is gone and does not reappear after panel reload.
+- [x] 10.5 Click "Delete" on a mapping. Dismiss the confirm dialog. Verify mapping still present. Click "Delete" again, confirm. Verify mapping is gone and does not reappear after panel reload.
 
-- [ ] 10.6 Uncheck the enabled toggle on a mapping. Verify it persists across panel reload. Re-enable and verify again.
+- [x] 10.6 Uncheck the enabled toggle on a mapping. Verify it persists across panel reload. Re-enable and verify again.
 
-- [ ] 10.7 Check the Overwrite Mode checkbox. Verify it persists across panel reload. Uncheck and verify.
+- [x] 10.7 Check the Overwrite Mode checkbox. Verify it persists across panel reload. Uncheck and verify.
 
-- [ ] 10.8 Attempt to save the Add form with an empty Label. Verify inline error is shown and no mapping is created.
+- [x] 10.8 Attempt to save the Add form with an empty Label. Verify inline error is shown and no mapping is created.
 
-- [ ] 10.9 Attempt to save the Add form with an empty Field Schema Name. Verify inline error is shown.
+- [x] 10.9 Attempt to save the Add form with an empty Field Schema Name. Verify inline error is shown.
 
-- [ ] 10.10 Verify no console errors appear in the side panel DevTools during any of the above operations.
+- [x] 10.10 Verify no console errors appear in the side panel DevTools during any of the above operations.
