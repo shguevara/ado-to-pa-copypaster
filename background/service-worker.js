@@ -58,6 +58,43 @@ function detectPageType(url) {
   return "unsupported";
 }
 
+// ─── Default AppSettings ─────────────────────────────────────────────────────
+
+/**
+ * The factory-default AppSettings written to chrome.storage.local on first install.
+ *
+ * Why inline here instead of a separate defaults.js?
+ * The classic service worker cannot use ES `import` statements, and `importScripts()`
+ * is synchronous and awkward to mock in Vitest. Two small objects do not warrant a
+ * new file and a new import mechanism — keeping them inline is the simplest, most
+ * reviewable choice. (design D-1)
+ *
+ * Matches SPEC.md §4.3 exactly:
+ *   - "default-title": captures the Work Item title via an aria-label selector
+ *   - "default-id":    captures the Initiative ID from the ADO page URL (__URL_ID__)
+ */
+const DEFAULT_SETTINGS = {
+  overwriteMode: false,
+  mappings: [
+    {
+      id:          "default-title",
+      label:       "Title",
+      adoSelector: "input[aria-label='Title'], textarea[aria-label='Title']",
+      paSelector:  "",
+      fieldType:   "text",
+      enabled:     true,
+    },
+    {
+      id:          "default-id",
+      label:       "Initiative ID",
+      adoSelector: "__URL_ID__",
+      paSelector:  "",
+      fieldType:   "text",
+      enabled:     true,
+    },
+  ],
+};
+
 // ─── Page Type Cache ─────────────────────────────────────────────────────────
 
 /**
@@ -111,6 +148,30 @@ async function updatePageType(tabId) {
 // without crashing on undefined globals.
 
 if (typeof chrome !== "undefined") {
+  // ── First-install seed ─────────────────────────────────────────────────────
+  // Write DEFAULT_SETTINGS to storage the first time the extension is installed.
+  //
+  // Why read before write? (design D-2)
+  // We cannot rely solely on `reason === "install"` to guard against clobbering
+  // user data: a user who uninstalls, exports their settings, then reinstalls
+  // would have reason === "install" but should not lose their saved configuration.
+  // Reading storage first and skipping the write if data exists is safe in all
+  // scenarios — clean install, extension update, developer reload, and reinstall.
+  chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+    if (reason !== "install") return;
+
+    try {
+      const result = await chrome.storage.local.get("settings");
+      if (result.settings == null) {
+        // Storage is empty — this is a genuine clean install.
+        await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
+      }
+      // If result.settings is already set, we skip the write to preserve user data.
+    } catch (err) {
+      console.error("[SW] onInstalled: failed to seed default settings:", err);
+    }
+  });
+
   // ── Action click → open side panel ────────────────────────────────────────
   // MV3 requires the side panel to be opened in response to a user gesture.
   // chrome.sidePanel.open() is called here instead of setPanelBehavior so that
@@ -145,17 +206,55 @@ if (typeof chrome !== "undefined") {
   });
 
   // ── Message handler ────────────────────────────────────────────────────────
-  // GET_PAGE_CONTEXT: side panel pulls the cached page type on load.
-  // This is a synchronous response (no async work needed — currentPageType
-  // is always up to date). We do NOT return `true` from the listener because
-  // the response is sent synchronously via sendResponse.
+  // Handles pull requests from the side panel.
+  //
+  // Return value contract (design D-3):
+  //   return false — response sent synchronously (GET_PAGE_CONTEXT)
+  //   return true  — response sent asynchronously; Chrome must hold the channel
+  //                  open until sendResponse() is called (GET_SETTINGS, SAVE_SETTINGS)
+  //   (implicit)   — unknown action; Chrome treats undefined as false
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    // ── GET_PAGE_CONTEXT ──────────────────────────────────────────────────────
+    // Synchronous: reads a module-level variable, no async work needed.
     if (message.action === "GET_PAGE_CONTEXT") {
       sendResponse({ pageType: currentPageType });
-      // Returning false (or nothing) tells Chrome the response was sent synchronously.
       return false;
     }
-    // Unknown messages are ignored — future phases will add more handlers here.
+
+    // ── GET_SETTINGS ──────────────────────────────────────────────────────────
+    // Async: reads chrome.storage.local. We must return `true` before the storage
+    // call resolves so Chrome keeps the response channel open. (design D-3, D-5)
+    if (message.action === "GET_SETTINGS") {
+      chrome.storage.local.get("settings")
+        .then((result) => {
+          // Fall back to DEFAULT_SETTINGS if storage is empty (e.g. before
+          // onInstalled completes on first load, or in a test environment).
+          // This ensures callers always receive a valid AppSettings object. (design D-5)
+          sendResponse({ settings: result.settings ?? DEFAULT_SETTINGS });
+        })
+        .catch((err) => {
+          console.error("[SW] GET_SETTINGS: storage read failed:", err);
+          sendResponse({ settings: DEFAULT_SETTINGS });
+        });
+      return true; // keep channel open for the async storage read
+    }
+
+    // ── SAVE_SETTINGS ─────────────────────────────────────────────────────────
+    // Async: writes chrome.storage.local. Replaces the entire AppSettings object
+    // atomically — no partial updates, no stale fields. (design D-3, D-4)
+    if (message.action === "SAVE_SETTINGS") {
+      chrome.storage.local.set({ settings: message.settings })
+        .then(() => {
+          sendResponse({ success: true });
+        })
+        .catch((err) => {
+          console.error("[SW] SAVE_SETTINGS: storage write failed:", err);
+          sendResponse({ success: false, error: err.message });
+        });
+      return true; // keep channel open for the async storage write
+    }
+
+    // Unknown messages are ignored — return undefined (Chrome treats as false).
   });
 }
 
