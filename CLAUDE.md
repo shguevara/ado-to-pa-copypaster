@@ -1,164 +1,230 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Repository-level runtime map, guardrails, and execution boundaries for Claude Code.
 
-## Project Overview
+This file defines:
+- Architectural invariants
+- Repo-specific constraints
+- Autonomy boundaries
+- Review & archive structure
 
-`ado-to-pa-copypaster` is a **Chrome Extension (Manifest V3)** that lets Project/Product Managers copy Initiative work item data from **Azure DevOps (ADO)** into a **PowerApps model-driven app** form with one click — eliminating manual field-by-field copy-paste.
-
-**Full specification**: `SPEC.md` (approved for implementation, v1.0).
-**Target users**: 2–4 PMs. **Target browser**: Chrome 114+.
-
----
-
-## Current State
-
-Specification is complete and approved. **No source files yet.** Implementation follows the 12-phase plan in `SPEC.md §11`.
+It does NOT define workflow discipline (see DEVELOPER.md).
+It does NOT redefine review mechanics (see REVIEWER.md).
 
 ---
 
-## Workflow Overview
+# 1. Sources of Truth (Precedence Order)
 
-```mermaid
-flowchart TD
-    START([▶ Start]) --> REQ["📄 REQUIREMENTS.md"]
+When instructions conflict, follow this order:
 
-    subgraph SETUP ["── One-Time: Requirements & Specification ──"]
-        ANALYST["🔍 Analyst\nclaude --system-prompt-file ANALYST.md"]
-        ARCHITECT["🏗 Architect\nclaude --system-prompt-file ARCHITECT.md"]
-    end
+1. Active OpenSpec change artifacts in `openspec/changes/<active-change>/`
+2. `SPEC.md`
+3. `DEVELOPER.md`
+4. `REVIEWER.md`
+5. `CLAUDE.md`
 
-    SPEC[("📋 SPEC.md\napproved ✅")]
+OpenSpec artifacts are more granular than `SPEC.md`.
 
-    subgraph CYCLE ["── Repeating: one cycle per SPEC.md phase (×12) ──"]
-        NEW["/opsx:new\nscoped to one SPEC.md phase"]
-        CHANGE[("openspec/changes/\nproposal → spec → tasks")]
-        DEV["👨‍💻 Developer\nclaude --system-prompt-file DEVELOPER.md\n/opsx:apply → implement → signal done"]
-        REV["🔍 Reviewer\nclaude --system-prompt-file REVIEWER.md\n/opsx:verify → write COMMENTS.md"]
-        GATE{"All 🔴\nresolved?"}
-        ARCHIVE["/opsx:archive"]
-        MORE{"More\nphases?"}
-
-        NEW --> CHANGE
-        CHANGE --> DEV
-        DEV -->|"signals done"| REV
-        REV -->|"COMMENTS.md"| GATE
-        GATE -->|"No — dev addresses items"| DEV
-        GATE -->|"Yes"| ARCHIVE
-        ARCHIVE --> MORE
-        MORE -->|"Yes — next phase"| NEW
-    end
-
-    DONE([✅ Complete])
-
-    REQ --> ANALYST
-    ANALYST -->|"refines requirements"| ARCHITECT
-    ARCHITECT -->|"produces"| SPEC
-    SPEC -->|"feeds phases into"| NEW
-    MORE -->|"No"| DONE
-```
-
-| File | Persona | Load with |
-|---|---|---|
-| `ANALYST.md` | Gathers & refines requirements | `claude --system-prompt-file ANALYST.md` |
-| `ARCHITECT.md` | Produces `SPEC.md` from requirements | `claude --system-prompt-file ARCHITECT.md` |
-| `DEVELOPER.md` | Implements tasks from OpenSpec change | `claude --system-prompt-file DEVELOPER.md` |
-| `REVIEWER.md` | Verifies, reviews, and archives | `claude --system-prompt-file REVIEWER.md` |
+If OpenSpec contradicts `SPEC.md`, stop and ask before proceeding.
 
 ---
 
-## Architecture
+# 2. Project Overview
 
-```
+`ado-to-pa-copypaster` is a Chrome Extension (Manifest V3).
+
+Purpose:
+Copy Initiative work item data from Azure DevOps into a PowerApps model-driven form.
+
+Constraints:
+- Chrome 114+
+- Loaded as unpacked extension
+- No build tooling
+- No bundler output
+- Alpine.js must be local (no CDN)
+- The extension directory is the distributable
+
+---
+
+# 3. Architecture Snapshot
+
 Chrome Browser
-├── Side Panel UI       sidepanel/index.html + app.js  (Alpine.js v3)
-├── Background SW       background/service-worker.js   (tab detection, message routing)
-├── ADO content script  scripts/ado-reader.js           (injected on-demand)
-├── PA content scripts  scripts/pa-writer.js            (injected on-demand)
-│                       scripts/element-picker.js       (injected on-demand)
-│                       scripts/selector-tester.js      (injected on-demand)
-├── chrome.storage.local  → AppSettings (mappings + overwriteMode)
+├── Side Panel UI → sidepanel/index.html + app.js (Alpine.js v3, local)
+├── Background SW → background/service-worker.js
+├── ADO reader → scripts/ado-reader.js (on-demand injection)
+├── PA writer → scripts/pa-writer.js (on-demand injection)
+├── Picker → scripts/element-picker.js (on-demand injection)
+├── Selector tester → scripts/selector-tester.js (on-demand injection)
+├── chrome.storage.local → AppSettings (mappings + overwriteMode)
 └── chrome.storage.session → CopiedFieldData[] (clears on browser close)
-```
 
-All communication via `chrome.runtime.sendMessage`. Scripts injected via `chrome.scripting.executeScript` (on-demand, not persistent `content_scripts`).
+Communication:
+`chrome.runtime.sendMessage`
 
----
+Injection:
+`chrome.scripting.executeScript`
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Extension | Chrome MV3 |
-| UI | Alpine.js v3 (local file, no CDN) |
-| Language | Vanilla JS (ES2020+), HTML5, CSS3 |
-| Build | **None** — loaded directly as unpacked extension |
-| Tests | Vitest (unit tests for pure logic only) |
+No persistent `content_scripts`.
 
 ---
 
-## File Structure (target)
+# 4. Non-Negotiable Repo Guardrails
 
-```
-ado-to-pa-copypaster/
-├── manifest.json
-├── background/service-worker.js
-├── sidepanel/index.html, app.js, styles.css
-├── scripts/ado-reader.js, pa-writer.js, element-picker.js, selector-tester.js
-├── lib/alpine.min.js, selector-generator.js
-└── assets/icon-16.png, icon-48.png, icon-128.png
-```
+These invariants must never be violated:
 
-No `node_modules`, no bundler output. The extension directory **is** the distributable.
+### BR-003 — No Form Submission
+`pa-writer.js` must NEVER:
+- Call form.submit()
+- Trigger submit events
+- Click Save buttons
 
----
+The extension must not submit forms.
 
-## Build & Run
+### BR-002 — Per-Field Continue-on-Failure
+Each field write must:
+- Be isolated in try/catch
+- Fail independently
+- Never abort the entire write operation
 
-No build step. Load the extension in Chrome:
-
-1. Open `chrome://extensions`
-2. Enable **Developer Mode**
-3. Click **Load unpacked** → select this directory
-
-To reload after code changes: click the refresh icon on the extension card.
-
----
-
-## Testing
-
-- **Unit tests** (Vitest): `lib/selector-generator.js` (`generateSelector`), import validation logic, URL ID extraction regex.
-- **Manual tests**: See `SPEC.md §9.3` — 24 scenarios covering copy, paste, picker, import/export, overwrite mode.
-- No automated E2E tests in v1.
-
-Run unit tests (once `package.json` is added):
-```bash
-npx vitest run
-```
+### Additional Invariants
+- No persistent content scripts
+- No architectural drift from MV3 + injection model
+- No build tooling
+- No CDN dependencies
+- No committed `node_modules`
 
 ---
 
-## Key Implementation Rules
+# 5. Autonomy Boundaries
 
-- **Read `SPEC.md` in full before writing any code.** It is the single source of truth.
-- **Check `COMMENTS.md`** (if it exists) and resolve all items before starting new work.
-- **TDD by default**: write failing test → implement → refactor. Justify any deviation.
-- **Before using any external library/API feature**: search Context7 for current docs.
-- **No `form.submit()`, no Save button clicks, no `submit` events** — `pa-writer.js` must never trigger form submission (BR-003).
-- **Per-field continue-on-failure** (BR-002): wrap each field in try/catch; one failure must not abort the rest.
-- **No build tooling** — keep everything vanilla; the extension loads directly.
+Claude may autonomously:
+- Modify or create JS, HTML, CSS within existing structure
+- Add or refactor unit tests
+- Improve error handling while preserving invariants
+- Refactor internal implementation without changing external behavior
+
+Claude must ask before:
+- Modifying `manifest.json` (especially permissions, host permissions, commands)
+- Changing storage schema keys or their meaning
+- Changing message names or payload contracts
+- Changing injection model or extension architecture
+- Adding any new dependency/library
+- Modifying `SPEC.md`
+- Introducing breaking behavior changes
+
+Default:
+Act autonomously unless a boundary is crossed.
 
 ---
 
-## Role System Prompts
+# 6. Definition of Done (Repository-Level)
 
-This repo uses role-specific system prompt files:
+A task is complete only if:
 
-| File | Role |
-|---|---|
-| `DEVELOPER.md` | Implementation agent — follow this when writing code |
-| `ARCHITECT.md` | Architect — produces `SPEC.md` from requirements |
-| `ANALYST.md` | Analyst — requirements gathering |
-| `REVIEWER.md` | Code reviewer — produces `COMMENTS.md` |
+- It satisfies the active OpenSpec acceptance criteria
+- It respects all BR rules
+- No new console errors are introduced in:
+  - Sidepanel
+  - Service worker
+  - ADO page
+  - PowerApps page
+- No unintended permission changes occurred
+- Storage schema remains unchanged unless explicitly approved
 
-When acting as the implementation agent, follow `DEVELOPER.md` conventions precisely.
+Completion does NOT imply archive approval.
+See Review & Archive Gate.
+
+---
+
+# 7. High-Risk Areas
+
+Extreme caution required when modifying:
+
+- `manifest.json`
+- Chrome permission declarations
+- chrome.storage schema
+- Message routing contracts
+- Injection timing logic
+- overwriteMode behavior
+- Selector generation logic
+
+These areas require explicit reasoning before change.
+
+---
+
+# 8. Environment Constraints (Windows + Git Bash)
+
+Shell:
+`/usr/bin/bash` (Git Bash), not PowerShell.
+
+Rules:
+- Use POSIX paths: `/c/Users/...`
+- Never use backslashes in paths
+- Do not use PowerShell syntax
+- Do not assume branch `main` exists
+- Verify branch before diffs
+
+Correct pattern:
+cd /c/path/to/repo && git status
+
+Avoid:
+git -C "C:\path"
+
+---
+
+# 9. Review & Archive Gate (Mandatory)
+
+This repository enforces independent review.
+
+The Developer does NOT self-archive.
+
+Workflow:
+
+1. Developer completes implementation per OpenSpec.
+2. Developer commits and signals ready for review.
+3. Reviewer (REVIEWER.md role) runs:
+   - /opsx:verify
+   - Diff analysis
+   - SPEC alignment review
+4. Reviewer writes `COMMENTS.md`.
+5. Developer addresses 🔴 MUST FIX items.
+6. Reviewer re-verifies.
+7. Reviewer runs /opsx:archive to close the change.
+
+A change is NOT complete until:
+- Reviewer has no remaining 🔴 MUST FIX items
+- Reviewer executes /opsx:archive
+
+Self-verify + self-archive is forbidden.
+
+---
+
+# 10. Role Separation Model
+
+Roles in this repository:
+
+- ANALYST → requirements shaping
+- ARCHITECT → SPEC authoring
+- DEVELOPER → implementation
+- REVIEWER → verification + archive gate
+
+Responsibilities are strictly separated.
+
+Do not collapse roles.
+
+---
+
+# 11. Architectural Stability Principle
+
+Prefer:
+- Minimal surface-area changes
+- Deterministic behavior
+- Explicit contracts
+- Stable injection timing
+- Clear separation of concerns
+
+Avoid:
+- Speculative refactors
+- Premature optimizations
+- Expanding scope beyond active OpenSpec change
+- Architectural drift
