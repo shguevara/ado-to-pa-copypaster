@@ -1,2 +1,190 @@
-/* TODO Phase 3: implement tab layout, status indicators, form controls, badges, spinner */
-/* See SPEC.md §7.1–§7.3 for layout and component descriptions. */
+/* =============================================================================
+   Side Panel Styles — ADO to PA Copypaster
+   Phase 3: Tab bar, layout, page context banner.
+   Later phases add styles to the placeholder sections at the bottom of this file.
+   ============================================================================= */
+
+/* ─── Base Reset & Layout ──────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Chrome Side Panel occupies the full viewport height of its panel window.
+   We use a flex column on #app so the tab bar stays fixed at the top and the
+   tab content area fills and scrolls the remaining space. */
+html,
+body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1f2937;       /* near-black — good contrast against white backgrounds */
+  background: #ffffff;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;     /* scrolling is per-panel, not the whole app container */
+}
+
+/* ─── Tab Bar ──────────────────────────────────────────────────────────────── */
+
+.tab-bar {
+  display: flex;
+  flex-shrink: 0;       /* never compressed — always visible at the top */
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  /* Bottom border acts as the active indicator — transparent by default. */
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;       /* muted grey — inactive tab text */
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: #374151;       /* slightly darker on hover to signal interactivity */
+}
+
+.tab-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+/* Active state: brand blue underline + matching text colour */
+.tab-btn--active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+/* ─── Tab Panels ───────────────────────────────────────────────────────────── */
+
+[role="tabpanel"] {
+  flex: 1;
+  overflow-y: auto;     /* each panel scrolls independently */
+  padding: 12px 14px;
+}
+
+/* ─── Page Context Banner ──────────────────────────────────────────────────── */
+/*
+   Three rows — ADO, PA, unsupported — are always in the DOM; Alpine's x-show
+   hides the two that don't match the current pageType.  Each row has a distinct
+   background tint so the user can instantly identify the current context at a
+   glance without reading the text.
+
+   role="status" + aria-live="polite" on the parent means screen readers
+   announce a change whenever pageType updates (via TAB_CHANGED push).
+*/
+
+.context-banner {
+  margin-bottom: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;     /* clip the row backgrounds to the rounded border */
+}
+
+.context-banner__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* ADO — light blue tint */
+.context-banner__row--ado {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+/* PowerApps — light green tint */
+.context-banner__row--pa {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+/* Unsupported — neutral grey tint */
+.context-banner__row--unsupported {
+  background: #f9fafb;
+  color: #6b7280;
+}
+
+.context-dot {
+  font-size: 12px;
+  flex-shrink: 0;       /* icon never wraps or compresses */
+  line-height: 1.6;     /* vertically align with the first line of text */
+}
+
+/* ─── Action Buttons  (Phase 7 / 10) ──────────────────────────────────────── */
+/*
+   Placeholder section — wired in Phase 7 (Copy Initiative) and Phase 10
+   (Paste to PowerApps).  Add styles for the following classes here:
+     .btn               — base button (padding, border-radius, font)
+     .btn--primary      — solid blue fill (Copy button)
+     .btn--secondary    — outlined (Paste button)
+     .btn:disabled      — reduced opacity, not-allowed cursor
+     .spinner           — rotating SVG or border animation
+     .overwrite-badge   — small pill badge ("Overwrite: ON / OFF")
+*/
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* ─── Field Status List  (Phase 7 / 10) ───────────────────────────────────── */
+/*
+   Placeholder section — populated after Copy or Paste operations.
+   Add styles for the following classes here:
+     .field-results-header   — "Results from: Copy" / "Results from: Paste" label
+     .field-result           — individual row (icon + label + message)
+     .field-result--success  — green ✅
+     .field-result--blank    — yellow ⚠️
+     .field-result--warning  — yellow ⚠️
+     .field-result--error    — red ❌
+     .field-result--skipped  — grey ⬜
+*/
+.field-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ─── Admin Tab  (Phase 5 – 9) ─────────────────────────────────────────────── */
+/*
+   Placeholder section — filled across multiple phases:
+     Phase 5: .settings-section, .mapping-list, .mapping-row, .mapping-form
+     Phase 6: .import-export-bar, .import-message
+     Phase 8: .pick-btn (element picker)
+     Phase 9: .test-selector-result
+   Also add shared utilities here when needed:
+     .badge             — fieldType pill (text / lookup / combo-select)
+     .form-group        — label + input wrapper
+     .inline-error      — red validation message below an input
+*/
+
+/* Temporary placeholder text shown until Phase 5 content is built */
+.placeholder-msg {
+  color: #9ca3af;
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 0;
+}

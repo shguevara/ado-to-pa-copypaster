@@ -4,23 +4,123 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ADO to PA Copypaster</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Phase 1 placeholder — replaced in Phase 3 with full Alpine.js tab UI -->
-  <div>Hello</div>
 
   <!--
-    Alpine.js must be loaded BEFORE app.js so that Alpine.store() and
-    Alpine.data() are available when app.js runs.
-    We use "defer" (not "async") on both scripts:
-      - "defer" guarantees DOM-parsed order and script-order execution.
-      - "async" would allow app.js to execute before alpine.min.js finishes,
-        breaking store registration.
-    Both scripts are local files to comply with Chrome MV3's default CSP,
-    which blocks external script origins without an explicit override.
+    Script loading order matters for Alpine.js store registration:
+
+      1. app.js (synchronous, no defer) — registers the 'alpine:init' listener
+         that creates the store and wires the TAB_CHANGED message handler.
+         MUST execute before Alpine starts so the listener is already in place
+         when Alpine fires 'alpine:init' during its own startup.
+
+      2. alpine.min.js (defer) — waits for the DOM to be fully parsed, then
+         starts Alpine.  Alpine fires 'alpine:init', our listener runs, the
+         store is registered, and Alpine proceeds to walk the DOM.
+
+    Both scripts are local files (no CDN) to comply with Chrome MV3's default
+    Content Security Policy, which blocks external script sources.
   -->
+  <script src="app.js"></script>
   <script defer src="../lib/alpine.min.js"></script>
-  <script defer src="./app.js"></script>
+
+  <!-- ── Root application wrapper ──────────────────────────────────────────── -->
+  <!-- All Alpine directives live inside #app. -->
+  <div id="app">
+
+    <!-- ── Tab Bar (SPEC.md §7.1) ───────────────────────────────────────────── -->
+    <!--
+      role="tablist" + role="tab" + aria-selected follows ARIA tabs pattern.
+      Active tab is tracked in $store.app.activeTab ("user" | "admin").
+      The .tab-btn--active class drives the visual underline indicator in CSS.
+    -->
+    <nav class="tab-bar" role="tablist" aria-label="Main navigation">
+      <button
+        role="tab"
+        class="tab-btn"
+        :class="{ 'tab-btn--active': $store.app.activeTab === 'user' }"
+        :aria-selected="String($store.app.activeTab === 'user')"
+        @click="$store.app.activeTab = 'user'"
+      >User</button>
+      <button
+        role="tab"
+        class="tab-btn"
+        :class="{ 'tab-btn--active': $store.app.activeTab === 'admin' }"
+        :aria-selected="String($store.app.activeTab === 'admin')"
+        @click="$store.app.activeTab = 'admin'"
+      >Admin</button>
+    </nav>
+
+    <!-- ── User Tab Panel (SPEC.md §7.2) ────────────────────────────────────── -->
+    <!--
+      x-show toggles CSS display instead of removing the element from the DOM.
+      This preserves the field-results list when the user briefly switches to
+      Admin and returns — no re-fetch needed. (design D-5)
+    -->
+    <div id="tab-user" role="tabpanel" aria-label="User" x-show="$store.app.activeTab === 'user'">
+
+      <!-- Page Context Banner ─────────────────────────────────────────────── -->
+      <!--
+        Three mutually exclusive rows, each shown based on pageType.
+        Each row carries both an icon and descriptive text — never icon-only —
+        so the state is accessible to screen readers (SPEC.md §11 Phase 11 note).
+        The coloured dot is aria-hidden because the surrounding text already
+        conveys the meaning.
+      -->
+      <div class="context-banner" role="status" aria-live="polite" aria-atomic="true">
+
+        <div class="context-banner__row context-banner__row--ado"
+             x-show="$store.app.pageType === 'ado'">
+          <span class="context-dot" aria-hidden="true">🔵</span>
+          <span>Azure DevOps Initiative detected. Ready to copy.</span>
+        </div>
+
+        <div class="context-banner__row context-banner__row--pa"
+             x-show="$store.app.pageType === 'pa'">
+          <span class="context-dot" aria-hidden="true">🟢</span>
+          <span>PowerApps form detected. Ready to paste.</span>
+        </div>
+
+        <div class="context-banner__row context-banner__row--unsupported"
+             x-show="$store.app.pageType === 'unsupported'">
+          <span class="context-dot" aria-hidden="true">⚪</span>
+          <span>This page is not supported. Navigate to an ADO Initiative or a PowerApps form.</span>
+        </div>
+
+      </div><!-- /context-banner -->
+
+      <!-- Copy / Paste Buttons ────────────────────────────────────────────── -->
+      <!-- Phase 7 (Copy) and Phase 10 (Paste) will populate this section. -->
+      <div class="action-buttons">
+        <!-- TODO Phase 7:  Copy Initiative button + spinner + Overwrite badge -->
+        <!-- TODO Phase 10: Paste to PowerApps button + spinner               -->
+      </div>
+
+      <!-- Field Status List ───────────────────────────────────────────────── -->
+      <!-- Phase 7 / 10 will render one row per FieldResult after operations. -->
+      <div class="field-results">
+        <!-- TODO Phase 7:  render fieldResults after Copy  -->
+        <!-- TODO Phase 10: render fieldResults after Paste -->
+      </div>
+
+    </div><!-- /tab-user -->
+
+    <!-- ── Admin Tab Panel (SPEC.md §7.3) ───────────────────────────────────── -->
+    <!--
+      Placeholder content — the Admin tab will be fully built in:
+        Phase 4:  Storage foundation (settings load/save)
+        Phase 5:  Mapping CRUD (add / edit / delete)
+        Phase 6:  Export / Import
+        Phase 8:  Element picker integration
+        Phase 9:  Test Selector integration
+    -->
+    <div id="tab-admin" role="tabpanel" aria-label="Admin" x-show="$store.app.activeTab === 'admin'">
+      <p class="placeholder-msg">⚙ Admin settings — coming in Phase 5.</p>
+    </div><!-- /tab-admin -->
+
+  </div><!-- /app -->
+
 </body>
 </html>
