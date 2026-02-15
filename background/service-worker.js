@@ -1,5 +1,5 @@
 /**
- * Background Service Worker — Phase 2: Tab Detection & Messaging
+ * Background Service Worker
  *
  * Responsibilities:
  *   1. Classify the active tab as "ado", "pa", or "unsupported" based on its URL.
@@ -7,11 +7,18 @@
  *   3. Broadcast TAB_CHANGED to the side panel whenever the page type changes.
  *   4. Respond to GET_PAGE_CONTEXT pull requests from the side panel.
  *   5. Open the side panel when the extension action icon is clicked.
+ *   6. Seed DEFAULT_SETTINGS into chrome.storage.local on first install
+ *      (or after manual storage clear + reload during development).
+ *   7. Respond to GET_SETTINGS requests from the side panel by reading
+ *      chrome.storage.local and returning the stored AppSettings.
+ *   8. Respond to SAVE_SETTINGS requests from the side panel by atomically
+ *      replacing the entire AppSettings object in chrome.storage.local.
  *
  * Architecture note: The service worker is ephemeral in MV3 — it can terminate
  * between events. Page type does NOT need to survive termination because it can
  * always be reconstructed from the current tab's URL on the next event.
- * Persistent data (settings, copied ADO data) will use chrome.storage in Phase 4+.
+ * Persistent data (settings, copied ADO data) is stored in chrome.storage.local
+ * and survives service-worker restarts automatically.
  */
 
 // ─── Page Type Detection ─────────────────────────────────────────────────────

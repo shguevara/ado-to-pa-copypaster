@@ -116,21 +116,222 @@
 
     <!-- ── Admin Tab Panel (SPEC.md §7.3) ───────────────────────────────────── -->
     <!--
-      Placeholder content — the Admin tab will be fully built in:
-        Phase 4:  Storage foundation (settings load/save)
-        Phase 5:  Mapping CRUD (add / edit / delete)
-        Phase 6:  Export / Import
-        Phase 8:  Element picker integration
-        Phase 9:  Test Selector integration
-    -->
-    <!--
       x-cloak prevents the admin panel from briefly flashing visible before
       Alpine initialises and applies x-show. The [x-cloak] CSS rule sets
       display:none immediately at parse time; Alpine removes the attribute
       once it has evaluated the x-show expression.
     -->
     <div id="tab-admin" role="tabpanel" aria-label="Admin" x-show="$store.app.activeTab === 'admin'" x-cloak>
-      <p class="placeholder-msg">⚙ Admin settings — coming in Phase 5.</p>
+
+      <!-- ── Settings Section (SPEC.md §7.3) ──────────────────────────────── -->
+      <!--
+        Task 4.1 — Overwrite Mode toggle.
+        @change passes the checkbox's boolean value to setOverwriteMode()
+        rather than assigning directly ($store.app.settings.overwriteMode = x)
+        because the Alpine CSP build silently drops assignment expressions in
+        directive handlers. Method calls are the correct CSP-safe pattern.
+      -->
+      <section class="settings-section">
+        <h2 class="settings-section__heading">⚙ Settings</h2>
+        <label class="overwrite-mode-label">
+          <input
+            type="checkbox"
+            class="overwrite-mode-checkbox"
+            :checked="$store.app.settings?.overwriteMode"
+            @change="$store.app.setOverwriteMode($event.target.checked)"
+          />
+          Overwrite Mode — overwrite existing PA field values during paste
+        </label>
+      </section>
+
+      <!-- ── Field Mappings Section (SPEC.md §7.3) ─────────────────────────── -->
+      <section class="mapping-section">
+
+        <!-- Section header + add button — Task 5.1 -->
+        <div class="mapping-section__header">
+          <span class="mapping-section__title">── Field Mappings ──</span>
+          <button
+            class="btn btn--small btn--primary"
+            @click="$store.app.openAddForm()"
+          >+ Add Mapping</button>
+        </div>
+
+        <!-- Empty-state message — Task 5.3 -->
+        <!--
+          Shown when there are no mappings. Uses a null-safe guard
+          ($store.app.settings?.mappings ?? []) because settings may be null
+          while GET_SETTINGS is still in flight on first load.
+        -->
+        <p
+          class="empty-state"
+          x-show="($store.app.settings?.mappings ?? []).length === 0"
+        >No mappings configured yet. Click + Add Mapping to get started.</p>
+
+        <!-- Mapping list — Task 5.2 -->
+        <!--
+          x-for iterates over settings.mappings.  The :key directive uses
+          mapping.id so Alpine can efficiently patch the DOM when a mapping is
+          added, removed, or reordered without re-rendering the entire list.
+        -->
+        <ul class="mapping-list" role="list">
+          <template x-for="mapping in ($store.app.settings?.mappings ?? [])" :key="mapping.id">
+            <li class="mapping-row">
+
+              <!-- Label + fieldType badge -->
+              <div class="mapping-row__info">
+                <span class="mapping-row__label" x-text="mapping.label"></span>
+                <span
+                  class="badge"
+                  :class="`badge--${mapping.fieldType}`"
+                  x-text="mapping.fieldType"
+                ></span>
+              </div>
+
+              <!-- Controls: enabled toggle + edit + delete -->
+              <div class="mapping-row__controls">
+
+                <!--
+                  Enabled toggle — @change fires toggleEnabled() rather than
+                  directly mutating mapping.enabled because direct assignment
+                  inside event directives is not supported by the CSP build.
+                -->
+                <label class="mapping-row__enabled-label" title="Enabled">
+                  <input
+                    type="checkbox"
+                    class="mapping-row__enabled-checkbox"
+                    :checked="mapping.enabled"
+                    @change="$store.app.toggleEnabled(mapping.id)"
+                  />
+                  <span class="sr-only">Enabled</span>
+                </label>
+
+                <button
+                  class="btn btn--small btn--secondary"
+                  @click="$store.app.openEditForm(mapping.id)"
+                >Edit</button>
+
+                <button
+                  class="btn btn--small btn--danger"
+                  @click="$store.app.deleteMapping(mapping.id)"
+                >Delete</button>
+
+              </div><!-- /mapping-row__controls -->
+            </li>
+          </template>
+        </ul><!-- /mapping-list -->
+
+        <!-- ── Mapping Form — Tasks 6.1–6.5 ─────────────────────────────── -->
+        <!--
+          x-show toggles the form panel.  The form stays in the DOM (x-show,
+          not x-if) so that the adminMappingForm x-data component can register
+          its $watch listener in init() even when the form is hidden — if we
+          used x-if, the component would be destroyed and re-created on every
+          open, resetting the $watch binding.
+
+          x-data="adminMappingForm()" mounts the local draft state component
+          defined in app.js. This is the CSP-safe way to attach local reactive
+          data without using inline object expressions. (design D-1)
+        -->
+        <div
+          class="mapping-form"
+          x-show="$store.app.showMappingForm"
+          x-data="adminMappingForm()"
+        >
+
+          <!-- Form heading — "Add Mapping" or "Edit Mapping" -->
+          <h3
+            class="mapping-form__heading"
+            x-text="$store.app.editingMapping ? 'Edit Mapping' : 'Add Mapping'"
+          ></h3>
+
+          <!-- Label field -->
+          <div class="form-group">
+            <label class="form-group__label" for="mapping-label">Label <span aria-hidden="true">*</span></label>
+            <input
+              id="mapping-label"
+              type="text"
+              class="form-group__input"
+              x-model="label"
+              placeholder="e.g. Title"
+            />
+          </div>
+
+          <!-- ADO Selector field -->
+          <div class="form-group">
+            <label class="form-group__label" for="mapping-ado-selector">ADO Selector <span aria-hidden="true">*</span></label>
+            <input
+              id="mapping-ado-selector"
+              type="text"
+              class="form-group__input"
+              x-model="adoSelector"
+              placeholder="e.g. input[aria-label='Title']"
+            />
+          </div>
+
+          <!-- Field Schema Name (PA) field + Phase 8 / 9 deferred buttons -->
+          <div class="form-group">
+            <label class="form-group__label" for="mapping-field-schema-name">Field Schema Name (PA) <span aria-hidden="true">*</span></label>
+            <div class="form-group__row">
+              <input
+                id="mapping-field-schema-name"
+                type="text"
+                class="form-group__input"
+                x-model="fieldSchemaName"
+                placeholder="e.g. cr123_lineofbusiness"
+              />
+              <!--
+                "Pick from Page" (Phase 8) and "Test Field" (Phase 9) buttons
+                are present but disabled as non-functional placeholders so the
+                layout slot is reserved and the buttons are discoverable in the
+                UI. They will be wired in later phases. (design Non-Goals)
+              -->
+              <button class="btn btn--small btn--secondary" disabled title="Available in Phase 8">Pick from Page</button>
+              <button class="btn btn--small btn--secondary" disabled title="Available in Phase 9">Test Field</button>
+            </div>
+          </div>
+
+          <!-- Field Type select -->
+          <div class="form-group">
+            <label class="form-group__label" for="mapping-field-type">Field Type <span aria-hidden="true">*</span></label>
+            <select
+              id="mapping-field-type"
+              class="form-group__select"
+              x-model="fieldType"
+            >
+              <option value="text">text</option>
+              <option value="lookup">lookup</option>
+              <option value="choice">choice</option>
+            </select>
+          </div>
+
+          <!-- Inline validation error — Task 6.4 -->
+          <!--
+            x-show hides the element when formError is empty (falsy).
+            x-text populates the message without innerHTML injection risk.
+          -->
+          <p class="inline-error" x-show="formError" x-text="formError"></p>
+
+          <!-- Save + Cancel buttons — Task 6.5 -->
+          <div class="mapping-form__actions">
+            <button class="btn btn--primary" @click="save()">Save</button>
+            <button class="btn btn--secondary" @click="$store.app.closeForm()">Cancel</button>
+          </div>
+
+        </div><!-- /mapping-form -->
+
+      </section><!-- /mapping-section -->
+
+      <!-- ── Export / Import Placeholders (Phase 6) ────────────────────────── -->
+      <!--
+        Task 7.1 — Buttons are visible but non-functional.
+        No @click handler is attached; they do nothing when clicked.
+        Full implementation is deferred to Phase 6.
+      -->
+      <section class="import-export-bar">
+        <button class="btn btn--secondary" disabled>↓ Export Mappings</button>
+        <button class="btn btn--secondary" disabled>↑ Import Mappings</button>
+      </section>
+
     </div><!-- /tab-admin -->
 
   </div><!-- /app -->
