@@ -36,12 +36,14 @@
 
 ## 6. Manual QA
 
-- [ ] 6.1 MT-18 — Navigate to a PA form; open a mapping; enter a valid `fieldSchemaName` and `fieldType`; click "Test Field" → green "✅ Found: INPUT element" (or correct tag) appears; element briefly highlighted on page.
-- [ ] 6.2 MT-19 — On PA form; enter a non-existent schema name; click "Test Field" → red "❌ No element found — check schema name and field type".
-- [ ] 6.3 MT-19a — Navigate to an ADO work item; open a mapping; enter a valid CSS selector (e.g. `input[aria-label='Title']`); click "Test ADO" → green "✅ Found: INPUT element"; element briefly highlighted.
-- [ ] 6.4 MT-19b — On ADO work item; enter a non-matching CSS selector; click "Test ADO" → red "❌ No element found — check the CSS selector".
-- [ ] 6.5 MT-19c — Open a mapping where `adoSelector === "__URL_ID__"` → "Test ADO" button is disabled regardless of current page.
-- [ ] 6.6 Verify "Testing…" loading state appears on both buttons and they re-enable after result arrives.
-- [ ] 6.7 Verify editing the ADO Selector or Field Schema Name inputs clears the corresponding test result immediately.
-- [ ] 6.8 Verify both test results are absent when the mapping form is opened fresh (Add or Edit).
-- [ ] 6.9 Verify no new console errors in side panel, service worker, ADO page, or PA page.
+- [x] 6.1 MT-18 — Navigate to a PA form; open a mapping; enter a valid `fieldSchemaName` and `fieldType`; click "Test Field" → green "✅ Found: INPUT element" (or correct tag) appears; element briefly highlighted on page.
+- [x] 6.2 MT-19 — On PA form; enter a non-existent schema name; click "Test Field" → red "❌ No element found — check schema name and field type".
+- [x] 6.3 MT-19a — Navigate to an ADO work item; open a mapping; enter a valid CSS selector (e.g. `input[aria-label='Title']`); click "Test ADO" → green "✅ Found: INPUT element"; element briefly highlighted.
+- [x] 6.4 MT-19b — On ADO work item; enter a non-matching CSS selector; click "Test ADO" → red "❌ No element found — check the CSS selector".
+- [x] 6.5 MT-19c — Open a mapping where `adoSelector === "__URL_ID__"` → "Test ADO" button is disabled regardless of current page.
+- [x] 6.6 Verify "Testing…" loading state appears on both buttons and they re-enable after result arrives.
+- [x] 6.7 Verify editing the ADO Selector or Field Schema Name inputs clears the corresponding test result immediately.
+- [x] 6.8 Verify both test results are absent when the mapping form is opened fresh (Add or Edit).
+- [x] 6.9 Verify no new console errors in side panel, service worker, ADO page, or PA page.
+
+<!-- Manual QA (6.1–6.9) requires a loaded Chrome extension against live ADO/PA pages. To be verified by the reviewer during /opsx:verify. -->
