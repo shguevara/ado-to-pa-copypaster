@@ -99,16 +99,107 @@
       </div><!-- /context-banner -->
 
       <!-- Copy / Paste Buttons ────────────────────────────────────────────── -->
-      <!-- Phase 7 (Copy) and Phase 10 (Paste) will populate this section. -->
       <div class="action-buttons">
-        <!-- TODO Phase 7:  Copy Initiative button + spinner + Overwrite badge -->
-        <!-- TODO Phase 10: Paste to PowerApps button + spinner               -->
+
+        <!--
+          Copy Initiative button — Phase 7 (§7.2, design D-6).
+
+          @click calls copyInitiative() which sets copyStatus = "copying",
+          sends COPY_INITIATIVE to the service worker, then sets
+          copyStatus = "done" with the per-field results.
+
+          :disabled uses isCopyDisabled() — a store helper — rather than an
+          inline expression because the Alpine CSP build prohibits || in
+          directive expressions.  (SPEC §3.2, design D-6)
+
+          The button is disabled while copying (prevents duplicate requests)
+          and when not on an ADO page (nothing to copy from).
+        -->
+        <button
+          class="btn btn--primary"
+          @click="$store.app.copyInitiative()"
+          :disabled="$store.app.isCopyDisabled()"
+        >Copy Initiative</button>
+
+        <!--
+          Spinner — visible while COPY_INITIATIVE is in flight.
+          role="status" + aria-label announces to screen readers that copying
+          is in progress.  The spinner disappears as soon as copyStatus
+          transitions from "copying" to "done".  (design D-6)
+        -->
+        <div
+          class="spinner"
+          x-show="$store.app.copyStatus === 'copying'"
+          role="status"
+          aria-label="Copying in progress…"
+          x-cloak
+        ></div>
+
+        <!-- TODO Phase 10: Paste to PowerApps button + spinner -->
       </div>
 
       <!-- Field Status List ───────────────────────────────────────────────── -->
-      <!-- Phase 7 / 10 will render one row per FieldResult after operations. -->
+      <!--
+        Per-field results list — rendered after a copy operation completes.
+
+        Visibility: shown only when hasCopyResults() returns true — a store
+        helper that checks `copyStatus === "done" && fieldResults.length > 0`.
+        The helper exists because Alpine CSP prohibits && in directives.
+
+        Each row shows the field label and a colour-coded status indicator:
+          .status-success → green  (field was read successfully)
+          .status-blank   → amber  (field was found but empty in ADO)
+          .status-error   → red    (selector failed or unexpected error)
+
+        The :key on the x-for is result.fieldId.  In the error case
+        ($success: false), fieldResults contains a single entry with
+        fieldId "__error__", which is unique and safe as a key.
+
+        Why x-show on the list rather than x-if?
+          x-show keeps the list in the DOM so the results persist when the
+          user briefly switches to the Admin tab and back — no re-render on
+          return.  (design D-5 rationale for x-show)
+      -->
       <div class="field-results">
-        <!-- TODO Phase 7:  render fieldResults after Copy  -->
+        <ul
+          class="field-results-list"
+          x-show="$store.app.hasCopyResults()"
+          role="list"
+          x-cloak
+        >
+          <template x-for="result in $store.app.fieldResults" :key="result.fieldId">
+            <li
+              class="field-result"
+              :class="{
+                'status-success': result.status === 'success',
+                'status-blank':   result.status === 'blank',
+                'status-error':   result.status === 'error'
+              }"
+            >
+              <!--
+                Status dot — colour comes from the parent .status-* class.
+                aria-hidden because the surrounding label + message text
+                already conveys the meaning to screen readers.
+              -->
+              <span class="field-result__dot" aria-hidden="true"></span>
+
+              <!-- Field label — sourced from mapping.label -->
+              <span class="field-result__label" x-text="result.label"></span>
+
+              <!--
+                Optional message — shown for blank and error results.
+                x-show="result.message" hides the element when message is
+                undefined (success results do not carry a message).
+              -->
+              <span
+                class="field-result__message"
+                x-show="result.message"
+                x-text="result.message"
+              ></span>
+            </li>
+          </template>
+        </ul>
+
         <!-- TODO Phase 10: render fieldResults after Paste -->
       </div>
 

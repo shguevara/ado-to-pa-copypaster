@@ -142,39 +142,123 @@ body {
 }
 
 /* ─── Action Buttons  (Phase 7 / 10) ──────────────────────────────────────── */
-/*
-   Placeholder section — wired in Phase 7 (Copy Initiative) and Phase 10
-   (Paste to PowerApps).  Add styles for the following classes here:
-     .btn               — base button (padding, border-radius, font)
-     .btn--primary      — solid blue fill (Copy button)
-     .btn--secondary    — outlined (Paste button)
-     .btn:disabled      — reduced opacity, not-allowed cursor
-     .spinner           — rotating SVG or border animation
-     .overwrite-badge   — small pill badge ("Overwrite: ON / OFF")
-*/
+
 .action-buttons {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;   /* button and spinner side-by-side */
+  align-items: center;
+  gap: 10px;
   margin-bottom: 14px;
+  flex-wrap: wrap;       /* gracefully stacks on very narrow panels */
+}
+
+/* ── Spinner ────────────────────────────────────────────────────────────────
+   CSS border-based rotating spinner — no external image or SVG needed.
+   The transparent top border creates the "gap" in the spinning ring.
+   animation: spin is defined below via @keyframes.
+   Matches the visual weight of the .btn elements it sits beside.
+*/
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #bfdbfe;       /* light-blue track ring */
+  border-top-color: #2563eb;       /* brand blue — the "active" segment */
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ─── Field Status List  (Phase 7 / 10) ───────────────────────────────────── */
-/*
-   Placeholder section — populated after Copy or Paste operations.
-   Add styles for the following classes here:
-     .field-results-header   — "Results from: Copy" / "Results from: Paste" label
-     .field-result           — individual row (icon + label + message)
-     .field-result--success  — green ✅
-     .field-result--blank    — yellow ⚠️
-     .field-result--warning  — yellow ⚠️
-     .field-result--error    — red ❌
-     .field-result--skipped  — grey ⬜
-*/
+
 .field-results {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Unordered list that wraps all per-field result rows */
+.field-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Individual result row ──────────────────────────────────────────────────
+   Each row shows: coloured dot | field label | optional message.
+   The left border stripe reinforces the status colour at a glance
+   (consistent with the context-banner__row pattern above).
+*/
+.field-result {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Status dot — a small filled circle coloured by the parent's .status-* class */
+.field-result__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 3px;   /* align vertically with the first line of text */
+  background: currentColor;  /* inherits the text colour set by .status-* */
+}
+
+/* Field label — primary text, slightly bolder */
+.field-result__label {
+  font-weight: 500;
+  color: inherit;
+}
+
+/* Optional message — muted secondary text (shown for blank / error results) */
+.field-result__message {
+  font-size: 12px;
+  opacity: 0.8;
+  color: inherit;
+}
+
+/* ── Status colour variants ─────────────────────────────────────────────────
+   Three statuses adoReaderMain can produce:
+     success — field was read and has a value       → green
+     blank   — field was found but empty in ADO     → amber/yellow
+     error   — selector failed or unexpected error  → red
+
+   Colour tokens deliberately match the import-message variants already in
+   this file (success/error) and the context-banner tokens (ADO/PA tints),
+   so the visual vocabulary stays consistent across the panel.
+*/
+
+/* success — green, matching import-message--success and context-banner--pa */
+.status-success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+/* blank — amber/yellow — field exists but was empty; softer than error */
+.status-blank {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+/* error — red, matching import-message--error and .btn--danger */
+.status-error {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
 }
 
 /* ─── Admin Tab  (Phase 5 – 9) ─────────────────────────────────────────────── */

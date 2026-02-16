@@ -13,6 +13,10 @@
  *      chrome.storage.local and returning the stored AppSettings.
  *   8. Respond to SAVE_SETTINGS requests from the side panel by atomically
  *      replacing the entire AppSettings object in chrome.storage.local.
+ *   9. Respond to COPY_INITIATIVE: inject ado-reader.js into the ADO tab,
+ *      collect FieldResult[], persist CopiedFieldData[] to session storage,
+ *      and return the full FieldResult[] to the side panel.
+ *  10. Respond to GET_COPIED_DATA: return CopiedFieldData[] from session storage.
  *
  * Architecture note: The service worker is ephemeral in MV3 — it can terminate
  * between events. Page type does NOT need to survive termination because it can
@@ -20,6 +24,28 @@
  * Persistent data (settings, copied ADO data) is stored in chrome.storage.local
  * and survives service-worker restarts automatically.
  */
+
+// ─── Injectable Reader Script ─────────────────────────────────────────────────
+//
+// Load adoReaderMain into the SW's global scope so it can be passed as the
+// `func` argument to chrome.scripting.executeScript.  Chrome serialises the
+// function via Function.prototype.toString() and executes it in the ADO page's
+// isolated world with the enabled mappings array as its argument.
+//
+// Why importScripts rather than definedfunc inline here?
+//   A separate file keeps the reader logic independently unit-testable in
+//   Vitest without mocking Chrome APIs — matching the pattern established by
+//   detectPageType (service-worker.js) and validateImportData (app.js).
+//   importScripts is synchronous so adoReaderMain is guaranteed to be in scope
+//   before any message handler fires.  (design D-1)
+//
+// Why the typeof guard?
+//   importScripts is a global only in classic service worker scope.
+//   In Node.js (Vitest), it is undefined — the guard prevents a ReferenceError
+//   that would abort the import and break the detectPageType tests.
+if (typeof importScripts === "function") {
+  importScripts("scripts/ado-reader.js");
+}
 
 // ─── Page Type Detection ─────────────────────────────────────────────────────
 
@@ -262,6 +288,122 @@ if (typeof chrome !== "undefined") {
           sendResponse({ success: false, error: err.message });
         });
       return true; // keep channel open for the async storage write
+    }
+
+    // ── COPY_INITIATIVE ───────────────────────────────────────────────────────
+    // Async: inject adoReaderMain into the active ADO tab, collect FieldResult[],
+    // persist CopiedFieldData[] to session storage, return results to caller.
+    //
+    // Flow (design D-1, D-4, D-5; SPEC §6.2):
+    //   1. Guard: must be on an ADO page — reject immediately if not.
+    //   2. Load AppSettings to get the enabled mappings array.
+    //   3. Find the active tab ID.
+    //   4. Inject adoReaderMain via executeScript (func + args pattern).
+    //      adoReaderMain is in global scope thanks to importScripts above.
+    //   5. Convert FieldResult[] → CopiedFieldData[] (omit error entries).
+    //   6. Persist to chrome.storage.session under "copiedData".
+    //   7. Return { success: true, results: FieldResult[] }.
+    //
+    // The entire async body runs in a self-invoking async IIFE so we can use
+    // await while still returning `true` synchronously to hold the channel.
+    if (message.action === "COPY_INITIATIVE") {
+      // Guard: side panel checks pageType but re-check here for safety.
+      // Return synchronously (false) — no async work needed for this early exit.
+      if (currentPageType !== "ado") {
+        sendResponse({ success: false, error: "Not on an ADO work item page." });
+        return false;
+      }
+
+      (async () => {
+        try {
+          // Load AppSettings from storage to get the current mapping list.
+          const storageResult = await chrome.storage.local.get("settings");
+          const settings = storageResult.settings ?? DEFAULT_SETTINGS;
+          const enabledMappings = (settings.mappings ?? []).filter(m => m.enabled);
+
+          // Find the active tab so we know which tab to inject into.
+          // We could track this separately, but a fresh query is reliable and
+          // consistent with the updatePageType() pattern used above. (design D-4)
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = activeTab?.id;
+          if (!tabId) {
+            sendResponse({ success: false, error: "No active tab found." });
+            return;
+          }
+
+          // Inject adoReaderMain into the ADO page.
+          // adoReaderMain was loaded into the SW's global scope via importScripts.
+          // Chrome serialises it with Function.prototype.toString() and runs it
+          // in the ADO page's isolated world, passing enabledMappings as args[0].
+          // If the tab navigated away between the pageType check and here, Chrome
+          // will throw — we catch that below. (design D-4)
+          let injectionResults;
+          try {
+            injectionResults = await chrome.scripting.executeScript({
+              target: { tabId },
+              func:   adoReaderMain,   // loaded via importScripts at the top of this file
+              args:   [enabledMappings],
+            });
+          } catch (injErr) {
+            console.error("[SW] COPY_INITIATIVE: executeScript failed:", injErr.message);
+            sendResponse({ success: false, error: injErr.message });
+            return;
+          }
+
+          // executeScript returns InjectionResult[].  The reader's return value
+          // (FieldResult[]) lives in results[0].result. (design D-4)
+          const fieldResults = injectionResults[0]?.result ?? [];
+
+          // Convert FieldResult[] → CopiedFieldData[].
+          // Only "success" and "blank" entries have copyable data.
+          // "error" entries are omitted from storage — they carry no value to paste.
+          // (design D-5; SPEC §6.2 step 7)
+          const copiedData = fieldResults
+            .filter(r => r.status === "success" || r.status === "blank")
+            .map(r => {
+              const entry = {
+                fieldId:    r.fieldId,
+                label:      r.label,
+                value:      r.status === "success" ? r.value : "",
+                readStatus: r.status,
+              };
+              // Include readMessage only for blank entries — the message explains
+              // why the value is empty without cluttering success entries.
+              if (r.status === "blank") entry.readMessage = r.message;
+              return entry;
+            });
+
+          // First-ever write to chrome.storage.session in this extension.
+          // Session storage is cleared when the browser closes — no migration needed.
+          // The `storage` permission already declared in manifest.json covers
+          // both local and session storage. (design D-5)
+          await chrome.storage.session.set({ copiedData });
+
+          sendResponse({ success: true, results: fieldResults });
+
+        } catch (err) {
+          console.error("[SW] COPY_INITIATIVE: unexpected error:", err);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+
+      return true; // keep channel open for the async IIFE above
+    }
+
+    // ── GET_COPIED_DATA ───────────────────────────────────────────────────────
+    // Async: read CopiedFieldData[] from session storage and return to caller.
+    // Returns { data: CopiedFieldData[] } or { data: null } if nothing stored.
+    // (§5.1)
+    if (message.action === "GET_COPIED_DATA") {
+      chrome.storage.session.get("copiedData")
+        .then((result) => {
+          sendResponse({ data: result.copiedData ?? null });
+        })
+        .catch((err) => {
+          console.error("[SW] GET_COPIED_DATA: storage read failed:", err);
+          sendResponse({ data: null });
+        });
+      return true; // keep channel open for the async storage read
     }
 
     // Unknown messages are ignored — return undefined (Chrome treats as false).

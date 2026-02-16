@@ -409,6 +409,80 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       this._saveSettings();
     },
 
+    // ── Copy Initiative ───────────────────────────────────────────────────
+    //
+    // Sends COPY_INITIATIVE to the service worker, which injects ado-reader.js
+    // into the active ADO tab and returns per-field results.  The store
+    // properties copyStatus / hasCopiedData / fieldResults are already declared
+    // in the store shape from Phase 3 — this method wires them to the message.
+    //
+    // Why the same Promise-wrapping pattern as importMappings()?
+    //   chrome.runtime.sendMessage's callback API is not natively awaitable.
+    //   Wrapping in `new Promise(resolve => ...)` with a closure flag lets us
+    //   use async/await for linear control flow and consolidate error handling
+    //   in one place.  (design D-6; same idiom as importMappings SAVE_SETTINGS)
+    async copyInitiative() {
+      this.copyStatus   = "copying";
+      this.lastOperation = "copy";
+      this.fieldResults  = [];
+
+      let response = null;
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: "COPY_INITIATIVE" }, (res) => {
+          if (chrome.runtime.lastError) {
+            // Service worker unavailable or channel closed unexpectedly.
+            response = {
+              success: false,
+              error:   chrome.runtime.lastError.message,
+            };
+            console.error("[app] COPY_INITIATIVE: runtime error:", chrome.runtime.lastError.message);
+          } else {
+            response = res;
+          }
+          resolve();
+        });
+      });
+
+      if (response?.success) {
+        // Successful copy — store all field results (success + blank + error)
+        // so the user can see exactly which fields were read and their status.
+        this.fieldResults  = response.results ?? [];
+        this.hasCopiedData = true;
+        this.copyStatus    = "done";
+      } else {
+        // Copy failed (not on ADO page, injection error, etc.) — surface as a
+        // single status:error row in the results list.  hasCopiedData stays
+        // false because there is nothing valid to paste.  (design D-6)
+        this.fieldResults = [{
+          fieldId: "__error__",
+          label:   "Error",
+          status:  "error",
+          message: response?.error ?? "Unknown error",
+        }];
+        this.copyStatus = "done";
+      }
+    },
+
+    // ── User tab helpers — CSP-safe computed properties ───────────────────
+    //
+    // The Alpine CSP expression parser does not support logical operators
+    // (&&, ||) or negation of property chains in directive expressions.
+    // These three methods encapsulate the multi-condition logic so the HTML
+    // directives stay as trivial method calls.  (design D-6, SPEC §3.2)
+
+    // Returns true when the Copy Initiative button should be disabled:
+    //   (a) not on an ADO page — nothing useful to copy
+    //   (b) already copying — prevent duplicate in-flight requests
+    isCopyDisabled() {
+      return this.pageType !== "ado" || this.copyStatus === "copying";
+    },
+
+    // Returns true when the per-field results list should be visible:
+    //   copyStatus is "done" AND there is at least one result entry.
+    hasCopyResults() {
+      return this.copyStatus === "done" && this.fieldResults.length > 0;
+    },
+
     // ── Export — download settings as a JSON file ──────────────────────────
     //
     // Reads from the in-memory store (this.settings) rather than issuing a
