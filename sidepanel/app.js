@@ -885,7 +885,15 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
         // Edit mode — find and replace in-place.  Array.findIndex preserves position.
         const idx = mappings.findIndex((m) => m.id === formData.id);
         if (idx !== -1) {
-          mappings[idx] = { ...formData }; // spread to decouple from the form object
+          // Spread existing mapping FIRST so all stored fields (including `enabled`)
+          // are preserved, then spread formData on top to update only what the
+          // form exposes (label, adoSelector, fieldSchemaName, fieldType).
+          //
+          // WHY? The mapping form does not render an `enabled` checkbox — that
+          // is toggled separately via toggleEnabled().  Doing `{ ...formData }`
+          // alone would silently drop `enabled`, resetting every edited mapping
+          // to unchecked.  (SPEC.md §7.3 Mapping Form, v1.5 amendment)
+          mappings[idx] = { ...mappings[idx], ...formData };
         }
       } else {
         // Add mode — generate a collision-free UUID and default to enabled.
@@ -959,11 +967,31 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     // (design D-5; §7.4)
     updateAfterCopy(fieldResults) {
       // Build a CopiedFieldData-compatible array from the raw FieldResult[].
-      // We only need readStatus for the hasCopiedData computation; the full
-      // CopiedFieldData with value/readMessage lives in session storage and is
-      // loaded from there when deriving field states.
+      //
+      // WHY mirror convertFieldResultsToCopiedData (service-worker.js) here?
+      //   The SW already stored the converted array in session storage, but
+      //   sending a GET_COPIED_DATA round-trip just to re-read it would make
+      //   updateAfterCopy asynchronous — complicating the call site in
+      //   copyInitiative().  Instead we convert synchronously in-memory using
+      //   the same rules:
+      //     - error entries: value "", readMessage = r.message || ""
+      //     - blank entries: value "", readMessage = r.message || ""
+      //     - success entries: value = r.value || "", no readMessage
+      //
+      //   deriveFieldUIStates() uses copiedItem.readMessage to build the
+      //   secondary "error" line in copy_failed rows (§7.2 derivation §6).
+      //   Without readMessage, copy_failed rows show the badge but no message.
       var copiedData = fieldResults.map(function(r) {
-        return { fieldId: r.fieldId, label: r.label, value: r.value || "", readStatus: r.status };
+        var entry = {
+          fieldId:    r.fieldId,
+          label:      r.label,
+          value:      r.status === "success" ? (r.value || "") : "",
+          readStatus: r.status,
+        };
+        if (r.status === "blank" || r.status === "error") {
+          entry.readMessage = r.message || "";
+        }
+        return entry;
       });
       this.hasCopiedData  = computeHasCopiedData(copiedData);
       this.lastOperation  = "copy";
