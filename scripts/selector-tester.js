@@ -37,7 +37,14 @@
 //       mapping.
 //
 // Selector format rules from SPEC.md §6.5.1:
-//   text   → [data-id="{schema}.fieldControl-text-box-text"]
+//   text   → primary:  [data-id="{schema}.fieldControl-text-box-text"]
+//            fallback: [data-id="{schema}.fieldControl-whole-number-text-input"]
+//              WHY: PA uses two different data-id suffixes for "text"-type inputs.
+//              Plain text lines use fieldControl-text-box-text; integer / whole-number
+//              fields (e.g. Planned Year) use fieldControl-whole-number-text-input.
+//              Both render as <input type="text"> and both accept simulateTyping, so
+//              both map to fieldType "text" in our schema.  We try the common suffix
+//              first and fall back to the whole-number suffix if not found.
 //   choice → [data-id="{schema}.fieldControl-option-set-select"]
 //   lookup → primary:  [data-id="{schema}.fieldControl-LookupResultsDropdown_{schema}_textInputBox_with_filter_new"]
 //            fallback: [data-id="{schema}.fieldControl-LookupResultsDropdown_{schema}_selected_tag"]
@@ -45,11 +52,12 @@
 // @param {string} fieldSchemaName - The PA field schema name, e.g. "shg_title".
 // @param {string} fieldType       - "text" | "choice" | "lookup"
 // @returns {{ primary: string, fallback?: string }}
-//   `fallback` is only defined for lookup fields.
+//   `fallback` is defined for text and lookup fields.
 function derivePaSelector(fieldSchemaName, fieldType) {
   if (fieldType === "text") {
     return {
-      primary: '[data-id="' + fieldSchemaName + '.fieldControl-text-box-text"]',
+      primary:  '[data-id="' + fieldSchemaName + '.fieldControl-text-box-text"]',
+      fallback: '[data-id="' + fieldSchemaName + '.fieldControl-whole-number-text-input"]',
     };
   }
 
@@ -126,7 +134,10 @@ function selectorTesterMain({ mode, fieldSchemaName, fieldType, adoSelector }) {
   // (tests import it directly from module.exports).
   function derivePaSelectorInline(schema, type) {
     if (type === "text") {
-      return { primary: '[data-id="' + schema + '.fieldControl-text-box-text"]' };
+      return {
+        primary:  '[data-id="' + schema + '.fieldControl-text-box-text"]',
+        fallback: '[data-id="' + schema + '.fieldControl-whole-number-text-input"]',
+      };
     }
     if (type === "choice") {
       return { primary: '[data-id="' + schema + '.fieldControl-option-set-select"]' };
@@ -154,8 +165,10 @@ function selectorTesterMain({ mode, fieldSchemaName, fieldType, adoSelector }) {
 
       el = document.querySelector(selectors.primary);
 
-      // Lookup fallback: if the primary returns null, try the filled-state
-      // selector before concluding "not found".  (design D-5)
+      // Fallback: if the primary returns null, try the fallback selector before
+      // concluding "not found".  Used for:
+      //   • text   — whole-number-text-input (PA integer fields)
+      //   • lookup — selected_tag (filled-state chip)  (design D-5)
       if (!el && selectors.fallback) {
         el = document.querySelector(selectors.fallback);
       }

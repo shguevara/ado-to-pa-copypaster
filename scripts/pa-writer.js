@@ -169,12 +169,24 @@ async function paWriterMain(copiedData, mappings, overwriteMode) {
 
   /**
    * Write a value into a plain text input field.
-   * Selector: `[data-id="{schema}.fieldControl-text-box-text"]`
+   *
+   * Primary selector: `[data-id="{schema}.fieldControl-text-box-text"]`
+   * Fallback selector: `[data-id="{schema}.fieldControl-whole-number-text-input"]`
+   *
+   * WHY TWO SELECTORS:
+   *   PA uses two different data-id suffixes for "text"-type inputs.
+   *   Plain text lines use fieldControl-text-box-text; integer / whole-number
+   *   fields (e.g. Planned Year) use fieldControl-whole-number-text-input.
+   *   Both render as <input type="text"> and both accept simulateTyping, so
+   *   both map to fieldType "text" in our schema.  Try the common suffix first
+   *   and fall back to the whole-number suffix if the element is not found.
+   *
    * BR-003: does not submit or save.
    */
   async function pasteText(fieldSchemaName, value, overwriteMode) {
-    const selector = "[data-id=\"" + fieldSchemaName + ".fieldControl-text-box-text\"]";
-    const input = document.querySelector(selector);
+    const selector         = "[data-id=\"" + fieldSchemaName + ".fieldControl-text-box-text\"]";
+    const fallbackSelector = "[data-id=\"" + fieldSchemaName + ".fieldControl-whole-number-text-input\"]";
+    const input = document.querySelector(selector) || document.querySelector(fallbackSelector);
     if (!input) return { status: "error", message: "Text input not found: " + selector };
     if (overwriteMode === false && input.value !== "") {
       return { status: "skipped", message: "Field already has a value (overwrite mode is off)" };

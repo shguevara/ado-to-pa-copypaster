@@ -91,10 +91,15 @@ describe("derivePaSelector", () => {
     );
   });
 
-  it("1.2b — text type has no fallback selector", () => {
-    // Only lookup fields have a fallback — text and choice are single-selector.
-    const result = derivePaSelector("shg_title", "text");
-    expect(result.fallback).toBeUndefined();
+  it("1.2b — text type: fallback is the whole-number-text-input selector", () => {
+    // PA whole-number fields (e.g. Planned Year) use fieldControl-whole-number-text-input
+    // instead of fieldControl-text-box-text.  Both map to fieldType "text".
+    // A fallback selector is required so the tester and writer try the second
+    // suffix when the first is not found.
+    const result = derivePaSelector("shg_plannedroadmapyear", "text");
+    expect(result.fallback).toBe(
+      '[data-id="shg_plannedroadmapyear.fieldControl-whole-number-text-input"]'
+    );
   });
 
   it("1.2c — choice type has no fallback selector", () => {
@@ -225,6 +230,47 @@ describe("selectorTesterMain", () => {
       '[data-id="shg_title.fieldControl-text-box-text"]'
     );
     expect(result).toEqual({ found: true, tagName: "INPUT" });
+  });
+
+  it("PA text mode: falls back to whole-number-text-input when primary returns null", () => {
+    // PA whole-number fields (e.g. Planned Year / shg_plannedroadmapyear) use
+    // fieldControl-whole-number-text-input instead of fieldControl-text-box-text.
+    // When the primary selector returns null the fallback must be tried.
+    const wholeNumberEl = { tagName: "INPUT", style: { outline: "" } };
+    const querySpy = vi.fn()
+      .mockReturnValueOnce(null)           // primary (text-box-text) → not found
+      .mockReturnValueOnce(wholeNumberEl); // fallback (whole-number-text-input) → found
+    savedDocument = globalThis.document;
+    globalThis.document = { querySelector: querySpy };
+
+    const result = selectorTesterMain({
+      mode:            "pa",
+      fieldSchemaName: "shg_plannedroadmapyear",
+      fieldType:       "text",
+    });
+
+    expect(querySpy).toHaveBeenNthCalledWith(1,
+      '[data-id="shg_plannedroadmapyear.fieldControl-text-box-text"]'
+    );
+    expect(querySpy).toHaveBeenNthCalledWith(2,
+      '[data-id="shg_plannedroadmapyear.fieldControl-whole-number-text-input"]'
+    );
+    expect(result).toEqual({ found: true, tagName: "INPUT" });
+  });
+
+  it("PA text mode: returns { found: false } when both primary and whole-number fallback are null", () => {
+    const querySpy = vi.fn().mockReturnValue(null);
+    savedDocument = globalThis.document;
+    globalThis.document = { querySelector: querySpy };
+
+    const result = selectorTesterMain({
+      mode:            "pa",
+      fieldSchemaName: "shg_plannedroadmapyear",
+      fieldType:       "text",
+    });
+
+    expect(querySpy).toHaveBeenCalledTimes(2); // primary + fallback both tried
+    expect(result).toEqual({ found: false });
   });
 
   it("PA lookup mode: returns found when primary selector matches (no fallback needed)", () => {
