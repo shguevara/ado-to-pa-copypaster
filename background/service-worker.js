@@ -489,10 +489,26 @@ if (typeof chrome !== "undefined") {
 
           await chrome.scripting.executeScript({
             target: { tabId },
-            // Remove the overlay if it exists.  Optional chaining is safe here
-            // because this runs as a serialised function string in the page
-            // context (not in an Alpine directive expression).
-            func: () => { document.getElementById("ado-pa-picker-overlay")?.remove(); },
+            // Full teardown via the cleanup function stored on the overlay by
+            // element-picker.js.  This removes the overlay, clears any hover
+            // outline, and deregisters all three event listeners — avoiding the
+            // "ghost outline + dangling listeners" bug observed when Cancel Pick
+            // was clicked in the side panel.  (QA fix — bug 8)
+            //
+            // Why overlay._cleanup rather than a window global?
+            //   Both this func and element-picker.js run in the same Chrome
+            //   extension isolated world, so they share the same DOM object
+            //   references.  Storing cleanup on the overlay element itself keeps
+            //   the contract self-contained and doesn't pollute window scope.
+            func: () => {
+              const overlay = document.getElementById("ado-pa-picker-overlay");
+              if (!overlay) return; // picker already cleaned up (Escape or click)
+              if (typeof overlay._cleanup === "function") {
+                overlay._cleanup();
+              } else {
+                overlay.remove(); // fallback: at least remove the overlay node
+              }
+            },
           });
 
           // Respond success regardless of whether the overlay was present.

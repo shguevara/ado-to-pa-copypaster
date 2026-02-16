@@ -136,6 +136,35 @@ if (typeof document !== "undefined") {
   //   more explicit and easier to audit in a code review.
   //   (tasks.md §2.3; SPEC.md §6.4)
 
+  // Shared teardown — called by onClick, onKeyDown (Escape), and the SW's
+  // CANCEL_ELEMENT_PICKER handler via overlay._cleanup.
+  //
+  // Why centralise cleanup rather than inline it in each handler?
+  //   Three exit paths (click, Escape, external Cancel Pick) need identical
+  //   teardown: clear hover outline, remove overlay, deregister all listeners.
+  //   Centralising prevents the three paths from drifting out of sync if the
+  //   code is later modified.  (QA fix — bugs 7 & 8)
+  function cleanup() {
+    if (hoveredEl) {
+      hoveredEl.style.outline      = "";
+      hoveredEl.style.outlineOffset = "";
+      hoveredEl = null;
+    }
+    overlay.remove();
+    document.removeEventListener("mouseover", onMouseOver);
+    document.removeEventListener("click",     onClick,   { capture: true });
+    document.removeEventListener("keydown",   onKeyDown, { capture: true });
+    // Null out the reference so a second call is a harmless no-op.
+    overlay._cleanup = null;
+  }
+
+  // Expose cleanup on the overlay DOM element so the SW's CANCEL_ELEMENT_PICKER
+  // inline func (which runs in the same isolated world) can call a full teardown
+  // rather than just removing the overlay node.  Without this, clicking "Cancel
+  // Pick" in the side panel left the hover outline and all three event listeners
+  // active on the page.  (QA fix — bug 8)
+  overlay._cleanup = cleanup;
+
   function onMouseOver(e) {
     // Clear the previous hover outline before applying a new one.
     // This ensures only one element is highlighted at a time.
@@ -157,25 +186,16 @@ if (typeof document !== "undefined") {
     e.preventDefault();
     e.stopPropagation();
 
-    // Clean up hover state and overlay before sending the message.
-    if (hoveredEl) {
-      hoveredEl.style.outline      = "";
-      hoveredEl.style.outlineOffset = "";
-      hoveredEl = null;
-    }
-    overlay.remove();
-
-    // Remove all three listeners so this injected script leaves no residual
-    // state in the page after the pick session ends.
-    document.removeEventListener("mouseover", onMouseOver);
-    document.removeEventListener("click",     onClick,   { capture: true });
-    document.removeEventListener("keydown",   onKeyDown);
+    // Save target before cleanup() runs (cleanup nulls hoveredEl but e.target
+    // remains accessible — saving it explicitly makes the intent clear).
+    const target = e.target;
+    cleanup();
 
     // Extract the field schema name and send the result back to the SW.
     // If extractSchemaName returns null (no suitable data-id found), the SW
     // still receives the message — the null schemaName triggers a warning
     // in the Admin form UI rather than being silently ignored.
-    const schemaName = extractSchemaName(e.target);
+    const schemaName = extractSchemaName(target);
     chrome.runtime.sendMessage({ action: "ELEMENT_PICKED", schemaName });
   }
 
@@ -191,26 +211,23 @@ if (typeof document !== "undefined") {
     //   result and show the "Could not determine field schema name" warning —
     //   which is misleading because the user explicitly chose to cancel.
     //   (design D-4; tasks.md §2.4)
-    if (hoveredEl) {
-      hoveredEl.style.outline      = "";
-      hoveredEl.style.outlineOffset = "";
-      hoveredEl = null;
-    }
-    overlay.remove();
-
-    // Remove all three listeners — same cleanup as the click path.
-    document.removeEventListener("mouseover", onMouseOver);
-    document.removeEventListener("click",     onClick,   { capture: true });
-    document.removeEventListener("keydown",   onKeyDown);
+    cleanup();
   }
 
   // Register all three listeners.
   // mouseover: highlights each element the mouse passes over.
   // click (capture): intercepts the user's selection before PA handles it.
-  // keydown: listens for Escape to silently cancel.
+  // keydown (capture): listens for Escape to silently cancel.
+  //
+  // Why { capture: true } on keydown?
+  //   PowerApps React handlers call stopPropagation() on keyboard events.
+  //   Without capture mode our keydown listener sits in the bubbling phase and
+  //   never fires — pressing Escape does nothing.  Capture mode ensures we fire
+  //   before PA's handlers regardless of what PA does with the event downstream.
+  //   (QA fix — bug 7)
   document.addEventListener("mouseover", onMouseOver);
   document.addEventListener("click",     onClick,   { capture: true });
-  document.addEventListener("keydown",   onKeyDown);
+  document.addEventListener("keydown",   onKeyDown, { capture: true });
 
 } // end document guard
 
