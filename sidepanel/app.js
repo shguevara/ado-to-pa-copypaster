@@ -21,6 +21,105 @@
  *   without any mocks.
  */
 
+// ─── Paste state — module-scope pure functions ────────────────────────────────
+//
+// These functions are extracted to module scope (outside the Alpine store) so
+// Vitest can import and test them in Node.js without needing a browser or Alpine.
+// The store methods delegate to them, keeping the directive expressions trivial.
+// (Same testability pattern as validateImportData below.)
+
+/**
+ * Returns true when the "Paste to PowerApps" button should be disabled.
+ *
+ * The button is only enabled when BOTH conditions are met:
+ *   (a) pageType === "pa"       — there is a PA form to paste into
+ *   (b) hasCopiedData === true  — there is ADO data ready to paste
+ *
+ * Why a pure function rather than inline Alpine expression?
+ *   The Alpine CSP expression parser does not support the || (logical OR)
+ *   operator in directive expressions (SPEC.md §3.2).  Wrapping the logic
+ *   here lets the HTML directive stay a trivial method call.  (design D-9)
+ *
+ * @param {string}  pageType      - The current page type from the store.
+ * @param {boolean} hasCopiedData - Whether ADO data has been copied.
+ * @returns {boolean}
+ */
+function computeIsPasteDisabled(pageType, hasCopiedData) {
+  return pageType !== "pa" || hasCopiedData !== true;
+}
+
+/**
+ * Returns true when the paste result list should be visible.
+ *
+ * Both conditions must be true:
+ *   (a) pasteStatus === "done"    — a paste operation has completed
+ *   (b) pasteResults.length > 0  — there is at least one result to show
+ *
+ * @param {string} pasteStatus   - The current paste status from the store.
+ * @param {Array}  pasteResults  - The current pasteResults array from the store.
+ * @returns {boolean}
+ */
+function computeHasPasteResults(pasteStatus, pasteResults) {
+  return pasteStatus === "done" && pasteResults.length > 0;
+}
+
+/**
+ * Core async action for "Paste to PowerApps".
+ *
+ * Extracted from the Alpine store so it can be unit-tested by passing in a
+ * mock chrome.runtime object.  The store method `pasteInitiative()` delegates
+ * to this function.
+ *
+ * State transitions:
+ *   1. Before message: pasteStatus = "pasting", pasteResults = []
+ *   2. On success:     pasteStatus = "done",    pasteResults = response.results
+ *   3. On failure:     pasteStatus = "done",    pasteResults = [error sentinel]
+ *
+ * @param {object} state          - The Alpine store (or mock store) with
+ *                                  pasteStatus and pasteResults properties.
+ * @param {object} chromeRuntime  - chrome.runtime (or mock) with sendMessage
+ *                                  and lastError.
+ * @returns {Promise<void>}
+ */
+async function _runPasteInitiative(state, chromeRuntime) {
+  // Step 1: set spinner state and clear stale results before messaging.
+  state.pasteStatus  = "pasting";
+  state.pasteResults = [];
+
+  let response = null;
+  await new Promise((resolve) => {
+    chromeRuntime.sendMessage({ action: "PASTE_INITIATIVE" }, (res) => {
+      if (chromeRuntime.lastError) {
+        // Service worker unavailable or channel closed unexpectedly.
+        response = {
+          success: false,
+          error:   chromeRuntime.lastError.message,
+        };
+        console.error("[app] PASTE_INITIATIVE: runtime error:", chromeRuntime.lastError.message);
+      } else {
+        response = res;
+      }
+      resolve();
+    });
+  });
+
+  // Step 2/3: update store based on the response.
+  if (response && response.success) {
+    state.pasteResults = response.results ?? [];
+    state.pasteStatus  = "done";
+  } else {
+    // Surface the error as a single sentinel entry in the results list.
+    // This matches the pattern used by copyInitiative() for error cases.
+    state.pasteResults = [{
+      fieldId: "__error__",
+      label:   "Error",
+      status:  "error",
+      message: response?.error ?? "Unknown error",
+    }];
+    state.pasteStatus = "done";
+  }
+}
+
 // ─── Import validation — module-scope pure function ───────────────────────────
 //
 // Why at module scope rather than inside the Alpine store?
@@ -525,7 +624,8 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     pasteStatus:  "idle",       // "idle" | "pasting" | "done"
     hasCopiedData: false,
     lastOperation: null,        // "copy" | "paste" | null
-    fieldResults:  [],          // FieldResult[] — rendered in status list
+    fieldResults:  [],          // FieldResult[] — rendered after Copy
+    pasteResults:  [],          // FieldResult[] — rendered after Paste
 
     // ── Admin tab state ───────────────────────────────────────────────────
     settings:           null,   // AppSettings — loaded from storage on init (below)
@@ -573,6 +673,14 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     // Returns the overwriteMode boolean, or false while settings is still null.
     getOverwriteMode() {
       return !!(this.settings && this.settings.overwriteMode);
+    },
+
+    // Returns "ON" or "OFF" for the read-only Overwrite Mode badge in the
+    // User Tab.  A method rather than an inline ternary because the Alpine CSP
+    // expression parser does not support ternary operators in x-text directives.
+    // (SPEC.md §3.2; design D-9)
+    getOverwriteModeLabel() {
+      return this.getOverwriteMode() ? "ON" : "OFF";
     },
 
     // Returns the form heading text — called from x-text in the form panel.
@@ -792,6 +900,31 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     //   copyStatus is "done" AND there is at least one result entry.
     hasCopyResults() {
       return this.copyStatus === "done" && this.fieldResults.length > 0;
+    },
+
+    // Returns true when the "Paste to PowerApps" button should be disabled.
+    // Delegates to the module-scope pure function so the Alpine CSP expression
+    // parser never has to evaluate the || operator in a directive.  (SPEC §3.2)
+    isPasteDisabled() {
+      return computeIsPasteDisabled(this.pageType, this.hasCopiedData);
+    },
+
+    // Returns true when the paste result list should be visible:
+    //   pasteStatus is "done" AND pasteResults has at least one entry.
+    hasPasteResults() {
+      return computeHasPasteResults(this.pasteStatus, this.pasteResults);
+    },
+
+    // ── Paste Initiative ──────────────────────────────────────────────────
+    //
+    // Sends PASTE_INITIATIVE to the service worker, which injects pa-writer.js
+    // into the active PA tab and returns per-field write results.
+    //
+    // Delegates to _runPasteInitiative so the async state-machine logic is
+    // independently unit-testable without Alpine or a Chrome runtime.
+    // (Same design rationale as _runPasteInitiative's JSDoc above.)
+    async pasteInitiative() {
+      await _runPasteInitiative(this, chrome.runtime);
     },
 
     // ── Export — download settings as a JSON file ──────────────────────────
@@ -1031,4 +1164,11 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
 // browser runtime.  The guard ensures this line is a no-op when loaded by Chrome
 // (Chrome's module system does not expose `module`).
 // Same pattern as detectPageType in service-worker.js. (design.md Decision 1)
-if (typeof module !== "undefined") module.exports = { validateImportData };
+if (typeof module !== "undefined") {
+  module.exports = {
+    validateImportData,
+    computeIsPasteDisabled,
+    computeHasPasteResults,
+    _runPasteInitiative,
+  };
+}

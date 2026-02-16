@@ -98,6 +98,36 @@
 
       </div><!-- /context-banner -->
 
+      <!--
+        Overwrite Mode badge — Phase 10 (design D-9; SPEC §11 Phase 10 step 4).
+
+        Read-only display of the current overwriteMode setting so users can
+        see at a glance whether existing PA field values will be overwritten
+        during a paste without navigating to the Admin tab.
+
+        Why no click handler?
+          Changing overwriteMode is an Admin Tab action.  The badge is intentionally
+          display-only — an interactive badge would blur the Admin/User separation
+          and could cause accidental setting changes.  (design D-9; spec: Badge is
+          not interactive)
+
+        getOverwriteMode() is already implemented (Admin tab reuses it for the
+        checkbox); we call it here so the value is always in sync with storage.
+        (design D-9 — loaded on app init + TAB_CHANGED via existing GET_SETTINGS call)
+
+        The badge uses x-text with a method call — no ternary or template literal
+        in the directive (Alpine CSP constraint, SPEC.md §3.2).
+        getOverwriteModeLabel() is a new store helper that returns "ON" or "OFF".
+      -->
+      <div class="overwrite-badge-row">
+        <span class="overwrite-badge__label">Overwrite Mode:</span>
+        <span
+          class="overwrite-badge"
+          :class="{ 'overwrite-badge--on': $store.app.getOverwriteMode(), 'overwrite-badge--off': !$store.app.getOverwriteMode() }"
+          x-text="$store.app.getOverwriteModeLabel()"
+        ></span>
+      </div>
+
       <!-- Copy / Paste Buttons ────────────────────────────────────────────── -->
       <div class="action-buttons">
 
@@ -135,7 +165,40 @@
           x-cloak
         ></div>
 
-        <!-- TODO Phase 10: Paste to PowerApps button + spinner -->
+        <!--
+          Paste to PowerApps button — Phase 10 (§7.2, design D-8).
+
+          @click calls pasteInitiative() which sets pasteStatus = "pasting",
+          sends PASTE_INITIATIVE to the service worker, then sets
+          pasteStatus = "done" with per-field write results.
+
+          :disabled uses isPasteDisabled() — a store helper — because the
+          Alpine CSP build prohibits || in directive expressions.  (SPEC §3.2)
+
+          The button is disabled when:
+            (a) not on a PA page (nothing to paste into)
+            (b) no copied data available (nothing to paste)
+          (design D-9; BR-004)
+        -->
+        <button
+          class="btn btn--primary"
+          @click="$store.app.pasteInitiative()"
+          :disabled="$store.app.isPasteDisabled()"
+        >Paste to PowerApps</button>
+
+        <!--
+          Spinner — visible while PASTE_INITIATIVE is in flight.
+          role="status" + aria-label announces to screen readers that pasting
+          is in progress.  The spinner disappears as soon as pasteStatus
+          transitions from "pasting" to "done".  (design D-8)
+        -->
+        <div
+          class="spinner"
+          x-show="$store.app.pasteStatus === 'pasting'"
+          role="status"
+          aria-label="Pasting in progress…"
+          x-cloak
+        ></div>
       </div>
 
       <!-- Field Status List ───────────────────────────────────────────────── -->
@@ -200,7 +263,61 @@
           </template>
         </ul>
 
-        <!-- TODO Phase 10: render fieldResults after Paste -->
+        <!--
+          Paste results list — rendered after a paste operation completes.
+
+          Visibility: shown only when hasPasteResults() returns true —
+          pasteStatus === "done" AND pasteResults.length > 0.
+
+          Status colour classes:
+            .status-success → green  (field was written successfully)
+            .status-skipped → grey   (field skipped — overwriteMode off + has value)
+            .status-warning → amber  (field found but no matching option/result)
+            .status-error   → red    (element not found or unexpected error)
+
+          Why x-show instead of x-if?
+            x-show keeps the list in the DOM so results persist when the user
+            briefly switches to the Admin tab and returns.  (design D-5)
+        -->
+        <ul
+          class="field-results-list"
+          x-show="$store.app.hasPasteResults()"
+          role="list"
+          x-cloak
+        >
+          <template x-for="result in $store.app.pasteResults" :key="result.fieldId">
+            <li
+              class="field-result"
+              :class="{
+                'status-success': result.status === 'success',
+                'status-skipped': result.status === 'skipped',
+                'status-warning': result.status === 'warning',
+                'status-error':   result.status === 'error'
+              }"
+            >
+              <!--
+                Status dot — colour comes from the parent .status-* class.
+                aria-hidden because the label + message conveys meaning to
+                screen readers.
+              -->
+              <span class="field-result__dot" aria-hidden="true"></span>
+
+              <!-- Field label — sourced from FieldResult.label -->
+              <span class="field-result__label" x-text="result.label"></span>
+
+              <!--
+                Optional message — shown for skipped, warning, and error results.
+                x-show="result.message" hides the element when message is
+                absent (success results typically have no message).
+              -->
+              <span
+                class="field-result__message"
+                x-show="result.message"
+                x-text="result.message"
+              ></span>
+            </li>
+          </template>
+        </ul>
       </div>
 
     </div><!-- /tab-user -->

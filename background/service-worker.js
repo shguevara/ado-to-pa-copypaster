@@ -56,6 +56,11 @@ if (typeof importScripts === "function") {
   // the `func` argument to executeScript for TEST_SELECTOR / TEST_ADO_SELECTOR.
   // Same importScripts pattern as adoReaderMain above.  (design D-1)
   importScripts("../scripts/selector-tester.js");
+
+  // Load paWriterMain into the SW's global scope so it can be passed as the
+  // `func` argument to executeScript for PASTE_INITIATIVE.
+  // Same pattern as adoReaderMain.  (design D-1, D-8)
+  importScripts("../scripts/pa-writer.js");
 }
 
 // ─── Page Type Detection ─────────────────────────────────────────────────────
@@ -637,6 +642,47 @@ if (typeof chrome !== "undefined") {
       return true; // keep channel open for the async IIFE above
     }
 
+    // ── PASTE_INITIATIVE ──────────────────────────────────────────────────────
+    // Async: inject paWriterMain into the active PA tab, write field values,
+    // and return per-field FieldResult[] to the side panel.
+    //
+    // Flow (design D-1, D-8; SPEC §11 Phase 10 step 2):
+    //   1. Guard: must be on a PA page — reject immediately if not.
+    //   2. Delegate to handlePasteInitiative() with all Chrome APIs injected
+    //      so the core logic remains unit-testable in Vitest.
+    //
+    // The early synchronous return for the pageType guard uses `return false`
+    // (same as COPY_INITIATIVE) to close the channel immediately — no async
+    // work is needed for this short-circuit path.
+    if (message.action === "PASTE_INITIATIVE") {
+      if (currentPageType !== "pa") {
+        sendResponse({ success: false, error: "Not on a PowerApps page." });
+        return false;
+      }
+
+      (async () => {
+        try {
+          const result = await handlePasteInitiative({
+            pageType:         currentPageType,
+            getLocalSettings: (key) => chrome.storage.local.get(key),
+            getSessionData:   (key) => chrome.storage.session.get(key),
+            queryActiveTab:   (opts) => chrome.tabs.query(opts),
+            injectScript:     (opts) => chrome.scripting.executeScript(opts),
+            // paWriterMain is loaded into global scope via importScripts above.
+            // eslint-disable-next-line no-undef
+            writerFunc:       paWriterMain,
+            defaultSettings:  DEFAULT_SETTINGS,
+          });
+          sendResponse(result);
+        } catch (err) {
+          console.error("[SW] PASTE_INITIATIVE: unexpected error:", err);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+
+      return true; // keep channel open for the async IIFE above
+    }
+
     // ── GET_COPIED_DATA ───────────────────────────────────────────────────────
     // Async: read CopiedFieldData[] from session storage and return to caller.
     // Returns { data: CopiedFieldData[] } or { data: null } if nothing stored.
@@ -657,9 +703,103 @@ if (typeof chrome !== "undefined") {
   });
 }
 
+// ─── PASTE_INITIATIVE Handler (extracted for testability) ────────────────────
+
+/**
+ * Core logic for the PASTE_INITIATIVE message handler.
+ *
+ * Extracted from the onMessage callback so it can be unit-tested in Vitest
+ * without a real Chrome runtime.  All Chrome API calls are injected as
+ * dependencies, matching the pattern established by detectPageType for the
+ * page-type detection logic.  (design D-8)
+ *
+ * Flow (mirrors COPY_INITIATIVE — design D-8):
+ *   1. Guard: pageType must be "pa" — return error if not.
+ *   2. Load AppSettings from local storage.
+ *   3. Read copiedData from session storage.
+ *   4. Guard: copiedData must not be null.
+ *   5. Filter to enabled mappings.
+ *   6. Find active tab.
+ *   7. Inject pa-writer.js (as paWriterMain func) with args.
+ *   8. Return { success: true, results: FieldResult[] }.
+ *
+ * BR-003: This function never calls form.submit() or any save action —
+ * that responsibility lies with pa-writer.js which is separately guarded.
+ *
+ * @param {object} deps - Injected dependencies (all Chrome API calls go here).
+ * @param {string}   deps.pageType         - Current page type string.
+ * @param {Function} deps.getLocalSettings - (key) => Promise<object> wrapping chrome.storage.local.get.
+ * @param {Function} deps.getSessionData   - (key) => Promise<object> wrapping chrome.storage.session.get.
+ * @param {Function} deps.queryActiveTab   - (opts) => Promise<Tab[]> wrapping chrome.tabs.query.
+ * @param {Function} deps.injectScript     - (opts) => Promise<InjectionResult[]> wrapping chrome.scripting.executeScript.
+ * @param {Function} deps.writerFunc       - The paWriterMain function reference to inject.
+ * @param {object}   deps.defaultSettings  - Fallback AppSettings when storage is empty.
+ * @returns {Promise<{success: boolean, results?: FieldResult[], error?: string}>}
+ */
+async function handlePasteInitiative(deps) {
+  const {
+    pageType,
+    getLocalSettings,
+    getSessionData,
+    queryActiveTab,
+    injectScript,
+    writerFunc,
+    defaultSettings,
+  } = deps;
+
+  // Guard 1: Must be on a PA page.
+  if (pageType !== "pa") {
+    return { success: false, error: "Not on a PowerApps page." };
+  }
+
+  // Load AppSettings from storage.
+  const storageResult = await getLocalSettings("settings");
+  const settings = storageResult.settings ?? defaultSettings;
+  const enabledMappings = (settings.mappings ?? []).filter(m => m.enabled);
+
+  // Load the data copied from ADO.
+  const sessionResult = await getSessionData("copiedData");
+  const copiedData = sessionResult.copiedData ?? null;
+
+  // Guard 2: Must have copied data before attempting a paste.
+  if (copiedData === null) {
+    return { success: false, error: "No copied data. Copy an Initiative first." };
+  }
+
+  // Find the active tab.
+  const [activeTab] = await queryActiveTab({ active: true, currentWindow: true });
+  const tabId = activeTab?.id;
+  if (!tabId) {
+    return { success: false, error: "No active tab found." };
+  }
+
+  // Inject pa-writer.js into the PA page.
+  // paWriterMain is in the SW's global scope thanks to importScripts above.
+  // Chrome serialises the function via Function.prototype.toString() and
+  // runs it in the PA tab's isolated world with the data args passed in.
+  // Injection errors (tab navigated, permission denied, etc.) are caught
+  // individually so the outer try/catch in the onMessage IIFE is still
+  // available as a last-resort safety net.
+  let injectionResults;
+  try {
+    injectionResults = await injectScript({
+      target: { tabId },
+      func:   writerFunc,
+      args:   [copiedData, enabledMappings, settings.overwriteMode],
+    });
+  } catch (injErr) {
+    console.error("[SW] PASTE_INITIATIVE: executeScript failed:", injErr.message);
+    return { success: false, error: injErr.message };
+  }
+
+  // InjectionResult[].result is the FieldResult[] returned by paWriterMain.
+  const fieldResults = injectionResults[0]?.result ?? [];
+  return { success: true, results: fieldResults };
+}
+
 // ─── Test Export ─────────────────────────────────────────────────────────────
 // Allow unit tests (Vitest / Node.js) to import detectPageType without a Chrome
 // runtime. The guard ensures this line is a no-op when loaded by Chrome.
 if (typeof module !== "undefined") {
-  module.exports = { detectPageType };
+  module.exports = { detectPageType, handlePasteInitiative };
 }

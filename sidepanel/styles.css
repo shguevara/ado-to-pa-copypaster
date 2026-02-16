@@ -261,6 +261,68 @@ body {
   color: #dc2626;
 }
 
+/* skipped — neutral blue-grey — field was skipped (overwriteMode off + has value) */
+.status-skipped {
+  background: #f0f4f8;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+/* warning — amber/yellow — field found but no exact option/lookup match */
+.status-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+/* ─── Phase 10 — Overwrite Mode badge ──────────────────────────────────────── */
+
+/*
+  The badge sits in the User Tab between the context banner and the action
+  buttons.  It is read-only (no hover/focus styles) and intentionally small
+  so it does not compete with the action buttons.  (design D-9; SPEC §3.2)
+*/
+
+.overwrite-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 11px;
+}
+
+.overwrite-badge__label {
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* Base badge pill */
+.overwrite-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+  cursor: default; /* badge is not interactive */
+  user-select: none;
+}
+
+/* ON variant — green pill to signal "overwriting is active" */
+.overwrite-badge--on {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
+/* OFF variant — neutral grey pill to signal "safe mode, no overwrite" */
+.overwrite-badge--off {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
 /* ─── Admin Tab  (Phase 5 – 9) ─────────────────────────────────────────────── */
 
 /* ── Shared button utilities ────────────────────────────────────────────────── */
