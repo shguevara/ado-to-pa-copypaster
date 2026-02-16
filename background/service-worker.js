@@ -51,6 +51,11 @@ if (typeof importScripts === "function") {
   //   The "../" prefix steps up from background/ to the extension root first,
   //   giving the correct chrome-extension://<id>/scripts/ado-reader.js path.
   importScripts("../scripts/ado-reader.js");
+
+  // Load selectorTesterMain into the SW's global scope so it can be passed as
+  // the `func` argument to executeScript for TEST_SELECTOR / TEST_ADO_SELECTOR.
+  // Same importScripts pattern as adoReaderMain above.  (design D-1)
+  importScripts("../scripts/selector-tester.js");
 }
 
 // ─── Page Type Detection ─────────────────────────────────────────────────────
@@ -517,6 +522,115 @@ if (typeof chrome !== "undefined") {
         } catch (err) {
           console.error("[SW] CANCEL_ELEMENT_PICKER: executeScript failed:", err.message);
           sendResponse({ success: false, error: err.message });
+        }
+      })();
+
+      return true; // keep channel open for the async IIFE above
+    }
+
+    // ── TEST_SELECTOR ─────────────────────────────────────────────────────────
+    // Async: inject selectorTesterMain into the active PA tab in "pa" mode.
+    // Derives the data-id selector from fieldSchemaName + fieldType, runs
+    // querySelector, highlights if found, and returns the result.
+    //
+    // Flow (design D-4; spec §TEST_SELECTOR background message handler):
+    //   1. Guard: must be on a PA page — return { found: false, error } if not.
+    //   2. Find the active tab ID.
+    //   3. Inject selectorTesterMain via executeScript (func + args pattern).
+    //      selectorTesterMain is in global scope thanks to importScripts above.
+    //   4. Return InjectionResult[0].result to the caller.
+    //   5. Catch injection errors and return { found: false, error: e.message }.
+    //
+    // Why func + args rather than files?
+    //   Unlike element-picker.js, selectorTesterMain must return a value (the
+    //   { found, tagName?, error? } result) back to the service worker.
+    //   executeScript with `files` gives no return value; `func` + `args` does.
+    //   Same reasoning as adoReaderMain.  (design D-1)
+    if (message.action === "TEST_SELECTOR") {
+      // Guard: side panel disables the button when pageType !== "pa", but this
+      // check adds defense-in-depth against rapid tab switching.  (design D-4)
+      if (currentPageType !== "pa") {
+        sendResponse({ found: false, error: "Not on a PA page" });
+        return false; // synchronous early exit — no async work needed
+      }
+
+      (async () => {
+        try {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = activeTab?.id;
+          if (!tabId) {
+            sendResponse({ found: false, error: "No active tab found." });
+            return;
+          }
+
+          let injectionResults;
+          try {
+            injectionResults = await chrome.scripting.executeScript({
+              target: { tabId },
+              func:   selectorTesterMain,   // loaded via importScripts above
+              args:   [{ mode: "pa", fieldSchemaName: message.fieldSchemaName, fieldType: message.fieldType }],
+            });
+          } catch (injErr) {
+            console.error("[SW] TEST_SELECTOR: executeScript failed:", injErr.message);
+            sendResponse({ found: false, error: injErr.message });
+            return;
+          }
+
+          // InjectionResult[].result is the value selectorTesterMain returned.
+          const result = injectionResults[0]?.result ?? { found: false, error: "No result from script." };
+          sendResponse(result);
+
+        } catch (err) {
+          console.error("[SW] TEST_SELECTOR: unexpected error:", err);
+          sendResponse({ found: false, error: err.message });
+        }
+      })();
+
+      return true; // keep channel open for the async IIFE above
+    }
+
+    // ── TEST_ADO_SELECTOR ─────────────────────────────────────────────────────
+    // Async: inject selectorTesterMain into the active ADO tab in "ado" mode.
+    // Passes adoSelector verbatim to querySelector, highlights if found, returns
+    // the result.
+    //
+    // Flow mirrors TEST_SELECTOR with the guard reversed to pageType === "ado".
+    // (design D-4; spec §TEST_ADO_SELECTOR background message handler)
+    if (message.action === "TEST_ADO_SELECTOR") {
+      // Guard: must be on an ADO page.
+      if (currentPageType !== "ado") {
+        sendResponse({ found: false, error: "Not on an ADO page" });
+        return false; // synchronous early exit
+      }
+
+      (async () => {
+        try {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = activeTab?.id;
+          if (!tabId) {
+            sendResponse({ found: false, error: "No active tab found." });
+            return;
+          }
+
+          let injectionResults;
+          try {
+            injectionResults = await chrome.scripting.executeScript({
+              target: { tabId },
+              func:   selectorTesterMain,   // loaded via importScripts above
+              args:   [{ mode: "ado", adoSelector: message.adoSelector }],
+            });
+          } catch (injErr) {
+            console.error("[SW] TEST_ADO_SELECTOR: executeScript failed:", injErr.message);
+            sendResponse({ found: false, error: injErr.message });
+            return;
+          }
+
+          const result = injectionResults[0]?.result ?? { found: false, error: "No result from script." };
+          sendResponse(result);
+
+        } catch (err) {
+          console.error("[SW] TEST_ADO_SELECTOR: unexpected error:", err);
+          sendResponse({ found: false, error: err.message });
         }
       })();
 

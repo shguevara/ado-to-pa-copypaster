@@ -358,19 +358,84 @@
             />
           </div>
 
-          <!-- ADO Selector field -->
+          <!-- ADO Selector field + Test ADO button (Phase 9) -->
+          <!--
+            Task 5.3: @input clears adoTestResult immediately when the selector
+            text changes so a stale "✅ Found" result from a previous test never
+            persists after the user edits the input.  (design D-3; spec §Result
+            clearing on input change)
+
+            Task 5.2: "Test ADO" button is disabled when:
+              (a) adoTestRunning — a test is already in flight (prevents double-sends)
+              (b) pageType !== "ado" — no ADO tab to inject into
+              (c) adoSelector === '__URL_ID__' — the sentinel has no real DOM element
+            The x-text directive toggles the label to "Testing…" while running
+            so the user sees immediate feedback.  (design D-6; spec §Test ADO button)
+
+            Task 5.5: Inline ADO result display below the input.
+              x-show="adoTestResult" hides the element until a test completes.
+              CSP constraint: no ternary / || / template literals in directives —
+              all conditions expressed as local method calls.  (SPEC.md §3.2; design D-2)
+          -->
           <div class="form-group">
             <label class="form-group__label" for="mapping-ado-selector">ADO Selector <span aria-hidden="true">*</span></label>
-            <input
-              id="mapping-ado-selector"
-              type="text"
-              class="form-group__input"
-              x-model="adoSelector"
-              placeholder="e.g. input[aria-label='Title']"
-            />
+            <div class="form-group__row">
+              <input
+                id="mapping-ado-selector"
+                type="text"
+                class="form-group__input"
+                x-model="adoSelector"
+                placeholder="e.g. input[aria-label='Title']"
+                @input="adoTestResult = null"
+              />
+              <!--
+                Test ADO button — isAdoTestDisabled() encapsulates the three-
+                condition disabled guard (running, wrong page, __URL_ID__ sentinel)
+                as a single local method call so the CSP parser never has to
+                evaluate ||.  getAdoTestLabel() toggles "Testing…" / "Test ADO"
+                as a method call to avoid an unsupported ternary.  (SPEC §3.2;
+                design D-2 / D-6)
+              -->
+              <button
+                class="btn btn--small btn--secondary"
+                :disabled="isAdoTestDisabled()"
+                @click="testAdoSelector()"
+                x-text="getAdoTestLabel()"
+              >Test ADO</button>
+            </div>
+            <!--
+              Inline ADO test result — shown below the ADO Selector input.
+              isAdoFound() / isAdoNotFound() encapsulate the && null-guard so
+              :class values stay as trivial method calls.  (spec §Inline test
+              result display; SPEC.md §3.2; design D-2)
+            -->
+            <p
+              class="inline-test-result"
+              x-show="adoTestResult"
+              :class="{ 'test-result--found': isAdoFound(), 'test-result--not-found': isAdoNotFound() }"
+              x-text="getAdoResultText()"
+              x-cloak
+            ></p>
           </div>
 
-          <!-- Field Schema Name (PA) field + Phase 8 / 9 deferred buttons -->
+          <!-- Field Schema Name (PA) field + Phase 8 picker + Phase 9 Test Field -->
+          <!--
+            Task 5.4: @input="paTestResult = null" clears the PA test result
+            whenever the schema name changes.  (design D-3; spec §Result clearing
+            on input change)
+
+            Task 5.1: The "Test Field" button (previously stubbed disabled) is
+            now fully wired:
+              - :disabled covers paTestRunning (in-flight) and pageType !== "pa".
+              - @click calls testPaField() (local method added in task 4.3).
+              - x-text toggles the label to "Testing…" while running.
+              isPickerStartDisabled() / the PA-page guard reuse the same
+              $store.app.pageType === 'pa' condition.  (spec §Test Field button)
+
+            Task 5.6: Inline PA result display appears below the Field Schema
+            Name input.  x-show hides it until paTestResult is set.  (spec §Inline
+            test result display; design D-2)
+          -->
           <div class="form-group">
             <label class="form-group__label" for="mapping-field-schema-name">Field Schema Name (PA) <span aria-hidden="true">*</span></label>
             <div class="form-group__row">
@@ -380,6 +445,7 @@
                 class="form-group__input"
                 x-model="fieldSchemaName"
                 placeholder="e.g. cr123_lineofbusiness"
+                @input="paTestResult = null"
               />
               <!--
                 "Pick from Page" / "Cancel Pick" (Phase 8) — mutually exclusive.
@@ -412,8 +478,33 @@
                 @click="cancelPicker()"
               >Cancel Pick</button>
 
-              <button class="btn btn--small btn--secondary" disabled title="Available in Phase 9">Test Field</button>
+              <!--
+                Test Field button — Phase 9 (spec §Test Field button (PA)).
+                isPaTestDisabled() combines paTestRunning and pageType !== "pa"
+                in a single JS method call so the CSP parser never sees ||.
+                getPaTestLabel() toggles "Testing…" / "Test Field" without a
+                ternary in the directive.  (SPEC.md §3.2; design D-2)
+              -->
+              <button
+                class="btn btn--small btn--secondary"
+                :disabled="isPaTestDisabled()"
+                @click="testPaField()"
+                x-text="getPaTestLabel()"
+              >Test Field</button>
             </div>
+            <!--
+              Inline PA test result — shown below the Field Schema Name input.
+              isPaFound() / isPaNotFound() encapsulate the && null-guard so
+              :class values stay as trivial method calls.  (spec §Inline test
+              result display; SPEC.md §3.2; design D-2)
+            -->
+            <p
+              class="inline-test-result"
+              x-show="paTestResult"
+              :class="{ 'test-result--found': isPaFound(), 'test-result--not-found': isPaNotFound() }"
+              x-text="getPaResultText()"
+              x-cloak
+            ></p>
           </div>
 
           <!--
@@ -426,12 +517,18 @@
           <p class="inline-warning" x-show="pickerWarning" x-text="pickerWarning"></p>
 
           <!-- Field Type select -->
+          <!--
+            Task 5.4: @change="paTestResult = null" clears the PA test result
+            when the user changes field type — the previously tested selector
+            would be for a different type and is now stale.  (design D-3)
+          -->
           <div class="form-group">
             <label class="form-group__label" for="mapping-field-type">Field Type <span aria-hidden="true">*</span></label>
             <select
               id="mapping-field-type"
               class="form-group__select"
               x-model="fieldType"
+              @change="paTestResult = null"
             >
               <option value="text">text</option>
               <option value="lookup">lookup</option>

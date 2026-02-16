@@ -637,6 +637,36 @@ body {
   line-height: 1.4;
 }
 
+/* ── Inline test result display (Phase 9) ────────────────────────────────────
+   Shown below the ADO Selector input (adoTestResult) and below the Field Schema
+   Name input (paTestResult) after the corresponding Test button completes.
+   Uses the same compact, font-weight-500 style as .import-message to remain
+   visually consistent with other inline feedback elements in the form.
+   (spec §Inline test result display; design D-2) */
+.inline-test-result {
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 4px;
+  margin-bottom: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+/* Found — green, matching the PA page-context banner and element-picker outline */
+.test-result--found {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+/* Not found / error — red, matching the inline-error / danger button tones */
+.test-result--not-found {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
 /* Save + Cancel button row */
 .mapping-form__actions {
   display: flex;

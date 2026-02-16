@@ -175,6 +175,19 @@ function adminMappingForm() {
     // or when a successful pick result populates fieldSchemaName.  (design D-6)
     pickerWarning:   "",
 
+    // Test result state (Phase 9) — local form state, NOT global store.
+    // Why local rather than global store?
+    //   Test results are ephemeral form-level feedback — they are meaningless
+    //   outside the context of the currently open mapping form.  Routing them
+    //   through the global store would pollute cross-cutting state with
+    //   transient form data.  The results arrive synchronously inside async
+    //   handler callbacks and can be assigned directly to x-data properties
+    //   without store indirection.  (design D-2)
+    paTestResult:    null,    // { found, tagName?, error? } | null
+    paTestRunning:   false,
+    adoTestResult:   null,    // { found, tagName?, error? } | null
+    adoTestRunning:  false,
+
     // init() is called once by Alpine when this x-data component is mounted.
     // It sets up a $watch so the form resets itself every time showMappingForm
     // flips to true — handles both "add" mode (editingMapping is null) and
@@ -206,6 +219,14 @@ function adminMappingForm() {
         // open so the form always starts in a clean state.
         this.formError     = "";
         this.pickerWarning = "";
+
+        // Reset test results on every form open so stale "✅ Found" messages
+        // from a prior edit session are never shown for a freshly opened form.
+        // (design D-3; spec §Test result clearing on input change and form reset)
+        this.paTestResult   = null;
+        this.paTestRunning  = false;
+        this.adoTestResult  = null;
+        this.adoTestRunning = false;
       });
 
       // React to ELEMENT_PICKED results forwarded through the store.
@@ -239,6 +260,89 @@ function adminMappingForm() {
             "try clicking directly on the field input or label";
         }
       });
+    },
+
+    // ── Phase 9 helper methods ─────────────────────────────────────────────
+    //
+    // ALL of these methods exist because the Alpine CSP expression parser does
+    // not support logical operators (||, &&), ternary expressions, or template
+    // literals in directive attribute values.  (SPEC.md §3.2; design D-2)
+    //
+    // Wrapping the multi-condition and conditional-string logic in plain JS
+    // method calls keeps the HTML directives as trivial, unambiguously parseable
+    // identifiers.  This mirrors the pattern used for isCopyDisabled(),
+    // isPickerStartDisabled(), getFormTitle(), etc. in the store.
+
+    // Returns true when the "Test ADO" button should be disabled.
+    //   • adoTestRunning      — a test is already in-flight (no double-send)
+    //   • pageType !== "ado"  — no ADO tab to inject into
+    //   • adoSelector === … — the __URL_ID__ sentinel has no DOM element (design D-6)
+    isAdoTestDisabled() {
+      return (
+        this.adoTestRunning ||
+        this.$store.app.pageType !== "ado" ||
+        this.adoSelector === "__URL_ID__"
+      );
+    },
+
+    // Returns true when the "Test Field" button should be disabled.
+    //   • paTestRunning       — a test is already in-flight (no double-send)
+    //   • pageType !== "pa"   — no PA tab to inject into
+    isPaTestDisabled() {
+      return this.paTestRunning || this.$store.app.pageType !== "pa";
+    },
+
+    // Returns the label text for the "Test ADO" button.
+    //   "Testing…" while in-flight, "Test ADO" otherwise.
+    getAdoTestLabel() {
+      return this.adoTestRunning ? "Testing\u2026" : "Test ADO";
+    },
+
+    // Returns the label text for the "Test Field" button.
+    //   "Testing…" while in-flight, "Test Field" otherwise.
+    getPaTestLabel() {
+      return this.paTestRunning ? "Testing\u2026" : "Test Field";
+    },
+
+    // Returns true when the ADO test result pill should use the "found" (green) style.
+    isAdoFound() {
+      return !!(this.adoTestResult && this.adoTestResult.found);
+    },
+
+    // Returns true when the ADO test result pill should use the "not found" (red) style.
+    isAdoNotFound() {
+      return !!(this.adoTestResult && !this.adoTestResult.found);
+    },
+
+    // Returns true when the PA test result pill should use the "found" (green) style.
+    isPaFound() {
+      return !!(this.paTestResult && this.paTestResult.found);
+    },
+
+    // Returns true when the PA test result pill should use the "not found" (red) style.
+    isPaNotFound() {
+      return !!(this.paTestResult && !this.paTestResult.found);
+    },
+
+    // Returns the inline feedback string for an ADO test result.
+    //   Encodes the message in plain JS where string concatenation is fine —
+    //   avoiding template literals that the CSP directive parser rejects.
+    getAdoResultText() {
+      var r = this.adoTestResult;
+      if (!r) return "";
+      if (r.error) return "\u274C Error: " + r.error;
+      if (r.found) return "\u2705 Found: " + r.tagName + " element";
+      return "\u274C No element found \u2014 check the CSS selector";
+    },
+
+    // Returns the inline feedback string for a PA test result.
+    //   Same pattern as getAdoResultText(); different "not found" message.
+    getPaResultText() {
+      var r = this.paTestResult;
+      if (!r) return "";
+      if (r.error) return "\u274C Error: " + r.error;
+      if (r.found) return "\u2705 Found: " + r.tagName + " element";
+      return "\u274C No element found \u2014 check schema name and field type";
     },
 
     // save() — validate the draft, then delegate to the store.
@@ -312,6 +416,72 @@ function adminMappingForm() {
     cancelPicker() {
       this.$store.app.pickerActive = false;
       chrome.runtime.sendMessage({ action: "CANCEL_ELEMENT_PICKER" });
+    },
+
+    // testPaField() — send TEST_SELECTOR to the service worker, which injects
+    // selectorTesterMain into the active PA tab in "pa" mode and returns the result.
+    //
+    // Why async/await with a Promise wrapper?
+    //   chrome.runtime.sendMessage's callback API is not natively awaitable.
+    //   Wrapping in `new Promise(resolve => ...)` lets us use async/await for
+    //   linear control flow — the same pattern used in copyInitiative().
+    //   (design D-2; spec §Test Field button (PA))
+    async testPaField() {
+      this.paTestRunning = true;
+      this.paTestResult  = null;
+
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            action:          "TEST_SELECTOR",
+            fieldSchemaName: this.fieldSchemaName,
+            fieldType:       this.fieldType,
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              // Service worker unavailable — treat as an error result so the
+              // side panel shows feedback rather than silently doing nothing.
+              this.paTestResult = { found: false, error: chrome.runtime.lastError.message };
+              console.error("[app] TEST_SELECTOR: runtime error:", chrome.runtime.lastError.message);
+            } else {
+              this.paTestResult = response;
+            }
+            resolve();
+          }
+        );
+      });
+
+      this.paTestRunning = false;
+    },
+
+    // testAdoSelector() — send TEST_ADO_SELECTOR to the service worker, which
+    // injects selectorTesterMain into the active ADO tab in "ado" mode.
+    //
+    // Same Promise-wrapper pattern as testPaField() above.
+    // (design D-2; spec §Test ADO button)
+    async testAdoSelector() {
+      this.adoTestRunning = true;
+      this.adoTestResult  = null;
+
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            action:      "TEST_ADO_SELECTOR",
+            adoSelector: this.adoSelector,
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              this.adoTestResult = { found: false, error: chrome.runtime.lastError.message };
+              console.error("[app] TEST_ADO_SELECTOR: runtime error:", chrome.runtime.lastError.message);
+            } else {
+              this.adoTestResult = response;
+            }
+            resolve();
+          }
+        );
+      });
+
+      this.adoTestRunning = false;
     },
   };
 }
