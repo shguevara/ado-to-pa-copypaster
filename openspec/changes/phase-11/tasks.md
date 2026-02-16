@@ -90,18 +90,18 @@
 
 ## 9. Manual QA (SPEC.md §9.3 MT-28 through MT-34)
 
-- [ ] 9.1 MT-28: Open the side panel with at least one enabled mapping. Before clicking Copy, verify all rows are visible with `NOT COPIED` badge. Verify Clear and Paste buttons are disabled.
+- [x] 9.1 MT-28: Open the side panel with at least one enabled mapping. Before clicking Copy, verify all rows are visible with `NOT COPIED` badge. Verify Clear and Paste buttons are disabled.
 
-- [ ] 9.2 MT-29: Navigate to an ADO work item. Click "Copy from Initiative". Verify COPIED rows show the field value on the secondary line. Click "Clear" — verify all rows reset to NOT COPIED and Clear/Paste become disabled again.
+- [x] 9.2 MT-29: Navigate to an ADO work item. Click "Copy from Initiative". Verify COPIED rows show the field value on the secondary line. Click "Clear" — verify all rows reset to NOT COPIED and Clear/Paste become disabled again. Also verified: editing a mapping preserves its enabled state (v1.5 fix).
 
-- [ ] 9.3 MT-30: Configure a mapping with an invalid ADO selector. Click Copy. Verify that field shows `FAILED` badge and the error message on the secondary line. Verify other fields that succeeded still show `COPIED`.
+- [x] 9.3 MT-30: Configure a mapping with an invalid ADO selector. Click Copy. Verify that field shows `FAILED` badge and the error message on the secondary line. Verify other fields that succeeded still show `COPIED`.
 
-- [ ] 9.4 MT-31: After a successful Copy, navigate to a PA form. Click "Paste to PowerApp". Verify successfully pasted fields show `PASTED` badge with the copied value on the secondary line.
+- [x] 9.4 MT-31: After a successful Copy, navigate to a PA form. Click "Paste to PowerApp". Verify successfully pasted fields show `PASTED` badge with the copied value on the secondary line.
 
-- [ ] 9.5 MT-32: With Overwrite Mode OFF and a PA field that already has a value, click Paste. Verify the skipped field shows `SKIPPED` badge with reason `"Field already has value"` (or equivalent).
+- [x] 9.5 MT-32: With Overwrite Mode OFF and a PA field that already has a value, click Paste. Verify the skipped field shows `SKIPPED` badge with reason `"Field already has value"` (or equivalent).
 
-- [ ] 9.6 MT-33: After Copy, switch to another tab and back. Verify field rows still show `COPIED`/`FAILED` states (not reset to NOT COPIED). After Paste, switch tabs and back — verify `PASTED`/`SKIPPED`/`FAILED` states persist within the same browser session.
+- [x] 9.6 MT-33: After Copy, switch to another tab and back. Verify field rows still show `COPIED`/`FAILED` states (not reset to NOT COPIED). After Paste, switch tabs and back — verify `PASTED`/`SKIPPED`/`FAILED` states persist within the same browser session.
 
-- [ ] 9.7 MT-34: Verify context banners show correct brand colours — ADO page: blue background/border/text; PA page: purple background/border/text; other page: white background with grey border. Verify dot is a CSS circle (not emoji). Verify banner label text is the short form: "Azure DevOps", "PowerApps", "This page is not supported."
+- [x] 9.7 MT-34: Verify context banners show correct brand colours — ADO page: blue background/border/text; PA page: purple background/border/text; other page: white background with grey border. Verify dot is a CSS circle (not emoji). Verify banner label text is the short form: "Azure DevOps", "PowerApps", "This page is not supported."
 
-- [ ] 9.8 MT-35: Verify all three action buttons are 48px tall with 12px font-size. Verify Copy is #0078D4, Paste is #742774, Clear is grey. Verify disabled state is #CCCCCC.
+- [x] 9.8 MT-35: Verify all three action buttons are 48px tall with 12px font-size. Verify Copy is #0078D4, Paste is #742774, Clear is grey. Verify disabled state is #CCCCCC.
