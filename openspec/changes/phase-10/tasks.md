@@ -78,12 +78,12 @@
 
 - [x] 9.1 Run full unit test suite (`npm test`) — confirm zero failures and zero regressions in existing tests.
 
-- [ ] 9.2 Manual QA — text field: load the extension, copy an ADO Initiative, navigate to the PA form, click "Paste to PowerApps", verify the text field value appears in the PA form and the result list shows `status: "success"`. (SPEC.md §11 Phase 10 step 5a)
+- [x] 9.2 Manual QA — text field: load the extension, copy an ADO Initiative, navigate to the PA form, click "Paste to PowerApps", verify the text field value appears in the PA form and the result list shows `status: "success"`. (SPEC.md §11 Phase 10 step 5a)
 
-- [ ] 9.3 Manual QA — choice field: verify the choice dropdown opens, the matching option is selected, and the field shows the new value in the PA form. (SPEC.md §11 Phase 10 step 5a)
+- [x] 9.3 Manual QA — choice field: verify the choice dropdown opens, the matching option is selected, and the field shows the new value in the PA form. (SPEC.md §11 Phase 10 step 5a)
 
-- [ ] 9.4 Manual QA — lookup field (empty): verify search results appear and the correct record is selected. (SPEC.md §11 Phase 10 step 5a)
+- [x] 9.4 Manual QA — lookup field (empty): verify search results appear and the correct record is selected. (SPEC.md §11 Phase 10 step 5a)
 
-- [ ] 9.5 Manual QA — overwrite OFF: for each field type (text, choice, lookup), set `overwriteMode: false` via Admin tab, pre-fill the PA field, paste again, and confirm the field value is unchanged and result shows `status: "skipped"`. (SPEC.md §11 Phase 10 step 5b)
+- [x] 9.5 Manual QA — overwrite OFF: for each field type (text, choice, lookup), set `overwriteMode: false` via Admin tab, pre-fill the PA field, paste again, and confirm the field value is unchanged and result shows `status: "skipped"`. (SPEC.md §11 Phase 10 step 5b)
 
-- [ ] 9.6 Manual QA — overwrite ON with lookup that has an existing value: set `overwriteMode: true`, confirm the existing lookup value is deleted, search is executed, and a new record is selected. (SPEC.md §11 Phase 10 step 5b)
+- [x] 9.6 Manual QA — overwrite ON with lookup that has an existing value: set `overwriteMode: true`, confirm the existing lookup value is deleted, search is executed, and a new record is selected. (SPEC.md §11 Phase 10 step 5b)
