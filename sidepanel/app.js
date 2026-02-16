@@ -118,6 +118,33 @@ if (typeof chrome !== "undefined") {
       return;
     }
   });
+
+  // ── Escape key cancel — side-panel-side handler ──────────────────────────
+  //
+  // Why handle Escape here rather than relying solely on element-picker.js?
+  //   Keyboard focus stays in the side panel after the user clicks "Pick from
+  //   Page".  Hovering over the PA tab moves the mouse there but does NOT
+  //   transfer keyboard focus — that requires an explicit click in the tab.
+  //   So when the user presses Escape, the keydown event fires in the side
+  //   panel's document, not the PA tab's document, and element-picker.js never
+  //   sees it.  This listener catches Escape in the side panel and drives the
+  //   same cancel flow as the "Cancel Pick" button.  (QA fix — bug 7)
+  //
+  // The element-picker.js keydown listener is kept as a secondary path for
+  // the rare case where the user clicks into the PA tab first (giving it
+  // keyboard focus) and then presses Escape there.  Both paths converge on
+  // the same outcome: pickerActive → false, overlay removed, no message sent.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const store = Alpine.store("app");
+    if (!store || !store.pickerActive) return;
+
+    // Mirror the cancelPicker() logic in adminMappingForm() so the cancel
+    // works even when the mapping form component hasn't fully initialised yet
+    // (e.g. if Escape is pressed extremely quickly after Pick starts).
+    store.pickerActive = false;
+    chrome.runtime.sendMessage({ action: "CANCEL_ELEMENT_PICKER" });
+  });
 }
 
 // ─── adminMappingForm() — local x-data component for the mapping form ─────────
