@@ -42,389 +42,20 @@
  *           partially-filled state.
  */
 
-// ─── MutationObserver Helpers ─────────────────────────────────────────────────
-
-/**
- * Wait for a single DOM element matching `selector` to appear in the document.
- *
- * Uses a MutationObserver on document.body rather than polling so the promise
- * resolves immediately when the node is inserted — no wasted CPU cycles.
- * (design D-3)
- *
- * Why observe document.body and not a narrower container?
- *   Fluent UI renders choice dropdowns and lookup flyouts into detached portal
- *   nodes (`<div id="__fluentPortalMountNode">`) that are direct children of
- *   <body>, NOT descendants of the field control.  We must observe at body
- *   level to catch these insertions.  (design D-5)
- *
- * @param {string}  selector  - A CSS selector string.
- * @param {number}  timeoutMs - Maximum wait time in milliseconds.
- * @returns {Promise<Element|null>} Resolves to the first matching element,
- *                                  or null if the timeout elapses.
- */
-function waitForElement(selector, timeoutMs) {
-  return new Promise((resolve) => {
-    // Check immediately — element may already be in the DOM.
-    const existing = document.querySelector(selector);
-    if (existing) {
-      resolve(existing);
-      return;
-    }
-
-    let timer;
-    const observer = new MutationObserver(() => {
-      const el = document.querySelector(selector);
-      if (el) {
-        // Found it — disconnect before resolving so we don't fire twice.
-        observer.disconnect();
-        clearTimeout(timer);
-        resolve(el);
-      }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // Fallback: if the element never appears, resolve with null and clean up.
-    timer = setTimeout(() => {
-      observer.disconnect();
-      resolve(null);
-    }, timeoutMs);
-  });
-}
-
-/**
- * Wait for one or more DOM elements matching `selector` to appear.
- *
- * Same MutationObserver pattern as waitForElement but returns a NodeList.
- * Resolves with a non-empty NodeList as soon as at least one match is found,
- * or with an empty NodeList (from a final querySelectorAll call) on timeout.
- *
- * Why return an empty NodeList rather than null on timeout?
- *   Callers can uniformly check `.length === 0` without needing a null guard,
- *   keeping strategy code cleaner.  (spec: waitForElements helper)
- *
- * @param {string}  selector  - A CSS selector string.
- * @param {number}  timeoutMs - Maximum wait time in milliseconds.
- * @returns {Promise<NodeList>} Resolves to a NodeList (may be empty on timeout).
- */
-function waitForElements(selector, timeoutMs) {
-  return new Promise((resolve) => {
-    // Check immediately.
-    const existing = document.querySelectorAll(selector);
-    if (existing.length > 0) {
-      resolve(existing);
-      return;
-    }
-
-    let timer;
-    const observer = new MutationObserver(() => {
-      const els = document.querySelectorAll(selector);
-      if (els.length > 0) {
-        observer.disconnect();
-        clearTimeout(timer);
-        resolve(els);
-      }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    timer = setTimeout(() => {
-      observer.disconnect();
-      // Return whatever is in the DOM at timeout (may be empty NodeList).
-      resolve(document.querySelectorAll(selector));
-    }, timeoutMs);
-  });
-}
-
-// ─── simulateTyping ───────────────────────────────────────────────────────────
-
-/**
- * Type `text` into `inputElement` in a way that triggers PowerApps' React
- * synthetic event system.
- *
- * WHY THIS IS NECESSARY:
- *   A plain `input.value = "foo"` assignment does NOT fire React's change
- *   handler because React tracks internal state separately.  We need to fire
- *   a proper InputEvent, which React's reconciler detects.
- *
- * STRATEGY:
- *   1. Select all existing content (so the new text replaces it).
- *   2. Try document.execCommand('insertText') — fires a real InputEvent.
- *   3. If execCommand did not set the value (it no-ops in some contexts),
- *      fall back to the native HTMLInputElement property setter + bubbling
- *      input/change events.  (design D-4)
- *   4. Wait 300ms before resolving to give the PA framework time to
- *      fire API calls (e.g. Dataverse lookup search).
- *
- * @param {HTMLInputElement} inputElement - The input to type into.
- * @param {string}           text         - The value to type.
- * @returns {Promise<void>} Resolves after the 300ms settle delay.
- */
-function simulateTyping(inputElement, text) {
-  return new Promise((resolve) => {
-    // Step 1: Select all — ensures execCommand replaces the full current value.
-    inputElement.select();
-
-    // Step 2: Attempt execCommand.  In a real Chrome context this fires the
-    // InputEvent that React's synthetic event system intercepts.
-    document.execCommand("insertText", false, text);
-
-    // Step 3: If execCommand did not set the value (no-op context), fall back
-    // to the native setter + explicit event dispatch.
-    if (inputElement.value !== text) {
-      // Native property setter via the Object prototype — bypasses React's own
-      // property descriptor so the next dispatch triggers React's handler.
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value"
-      ).set;
-      nativeInputValueSetter.call(inputElement, text);
-
-      // Dispatch bubbling events so React's SyntheticEvent system picks them up.
-      inputElement.dispatchEvent(new Event("input",  { bubbles: true }));
-      inputElement.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-
-    // Step 4: Settle delay — PA framework needs time to react to the input
-    // before the next interaction (e.g. lookup dropdown appearance).
-    setTimeout(resolve, 300);
-  });
-}
-
-// ─── Field Write Strategies ───────────────────────────────────────────────────
-
-/**
- * Write a value into a plain text input field.
- *
- * Selector pattern: `[data-id="{schema}.fieldControl-text-box-text"]`
- *
- * Why `data-id` rather than `id` or `name`?
- *   PowerApps generates numeric GUIDs for `id` attributes on every page load
- *   so they are not stable.  The `data-id` attribute uses the field schema
- *   name which is deterministic and stable across sessions.  (design D-7)
- *
- * BR-003: This function NEVER submits or saves the form.
- *
- * @param {string}  fieldSchemaName - The PA field schema name (e.g. "cr123_title").
- * @param {string}  value           - The value to write.
- * @param {boolean} overwriteMode   - If false, skip fields that already have a value.
- * @returns {Promise<{status: string, message?: string}>}
- */
-async function pasteText(fieldSchemaName, value, overwriteMode) {
-  const selector = `[data-id="${fieldSchemaName}.fieldControl-text-box-text"]`;
-  const input = document.querySelector(selector);
-
-  if (!input) {
-    return { status: "error", message: `Text input not found: ${selector}` };
-  }
-
-  // Overwrite guard: if the field already has content and overwriteMode is off,
-  // leave it untouched.  (BR-001; spec: Overwrite Mode skip)
-  if (overwriteMode === false && input.value !== "") {
-    return {
-      status: "skipped",
-      message: "Field already has a value (overwrite mode is off)",
-    };
-  }
-
-  input.focus();
-  await simulateTyping(input, value);
-
-  return { status: "success" };
-}
-
-/**
- * Write a value into a choice (option-set / combobox) field.
- *
- * Selector pattern: `[data-id="{schema}.fieldControl-option-set-select"]`
- *
- * CRITICAL DETAIL — Fluent UI portal:
- *   After clicking the combobox, the dropdown listbox is rendered into
- *   `<div id="__fluentPortalMountNode">`, a sibling of `<div id="shell-container">`
- *   at body level.  It is NOT a descendant of the combobox.  We must query
- *   `[role="option"]` from the document root, not from the combobox container.
- *   (design D-5; SPIKE-PA-STRATEGIES.md)
- *
- * @param {string}  fieldSchemaName - The PA field schema name.
- * @param {string}  value           - The option text to select (case-insensitive).
- * @param {boolean} overwriteMode   - If false, skip if a non-default option is selected.
- * @returns {Promise<{status: string, message?: string}>}
- */
-async function pasteChoice(fieldSchemaName, value, overwriteMode) {
-  const selector = `[data-id="${fieldSchemaName}.fieldControl-option-set-select"]`;
-  const combobox = document.querySelector(selector);
-
-  if (!combobox) {
-    return { status: "error", message: `Choice combobox not found: ${selector}` };
-  }
-
-  // Overwrite guard: PA comboboxes show "---" as the default/empty placeholder.
-  // Any non-empty, non-"---" title means a value is already selected.
-  // (spec: Overwrite Mode skip — choice field)
-  if (overwriteMode === false && combobox.title && combobox.title !== "---") {
-    return {
-      status: "skipped",
-      message: "Field already has a value (overwrite mode is off)",
-    };
-  }
-
-  // Open the dropdown.
-  combobox.click();
-
-  // Wait for the Fluent UI portal to render option elements.
-  // Query from document root — the portal is detached from the field.  (design D-5)
-  const options = await waitForElements('[role="option"]', 3000);
-  if (options.length === 0) {
-    return { status: "error", message: "No options appeared after opening dropdown" };
-  }
-
-  // Case-insensitive match against each option's trimmed text content.
-  const target = value.trim().toLowerCase();
-  let matchedOption = null;
-  const available = [];
-
-  for (const opt of options) {
-    const text = opt.textContent.trim();
-    available.push(text);
-    if (text.toLowerCase() === target) {
-      matchedOption = opt;
-    }
-  }
-
-  if (!matchedOption) {
-    return {
-      status: "warning",
-      message: `No option matched "${value}". Available: ${available.join(", ")}`,
-    };
-  }
-
-  matchedOption.click();
-  return { status: "success" };
-}
-
-/**
- * Write a value into a lookup (relationship) field.
- *
- * All sub-selectors are derived from the prefix:
- *   `{schema}.fieldControl-LookupResultsDropdown_{schema}`
- *
- * STATE DETECTION:
- *   PowerApps lookup fields render different DOM structures depending on whether
- *   a value is already selected.  The delete button (`{prefix}_selected_tag_delete`)
- *   is the most reliable sentinel: it exists only when a value is selected.
- *   (design D-6)
- *
- * BR-005: If search returns no results or no match, the typed text is cleared
- *   from the input before returning so the field is not left with partial text.
- *
- * @param {string}  fieldSchemaName - The PA field schema name.
- * @param {string}  value           - The lookup display name to search (case-insensitive).
- * @param {boolean} overwriteMode   - If false, skip if a value is already selected.
- * @returns {Promise<{status: string, message?: string}>}
- */
-async function pasteLookup(fieldSchemaName, value, overwriteMode) {
-  const prefix = `${fieldSchemaName}.fieldControl-LookupResultsDropdown_${fieldSchemaName}`;
-  const deleteButtonSelector = `[data-id="${prefix}_selected_tag_delete"]`;
-  const textInputSelector    = `[data-id="${prefix}_textInputBox_with_filter_new"]`;
-
-  const deleteButton = document.querySelector(deleteButtonSelector);
-
-  // Overwrite guard: if a value is already selected and overwrite is off, skip.
-  // (BR-001; spec: Overwrite Mode skip — lookup field)
-  if (overwriteMode === false && deleteButton) {
-    return {
-      status: "skipped",
-      message: "Field already has a value (overwrite mode is off)",
-    };
-  }
-
-  // If a value is selected and we are overwriting, clear it first.
-  if (deleteButton) {
-    deleteButton.click();
-
-    // Wait for the text input to reappear after the existing value is cleared.
-    const appeared = await waitForElement(textInputSelector, 3000);
-    if (!appeared) {
-      return {
-        status: "error",
-        message: "Text input did not appear after clearing existing value",
-      };
-    }
-  }
-
-  // Locate the text input (present immediately when field is empty).
-  const textInput = document.querySelector(textInputSelector);
-  if (!textInput) {
-    return { status: "error", message: `Lookup text input not found: ${textInputSelector}` };
-  }
-
-  // Type the search term to trigger Dataverse lookup.
-  textInput.focus();
-  textInput.click();
-  await simulateTyping(textInput, value);
-
-  // Wait for Dataverse to return results.  5s timeout reflects real API latency.
-  const resultsContainerSelector = `[data-id="${prefix}_resultsContainer"]`;
-  const resultItems = await waitForElements(resultsContainerSelector, 5000);
-
-  if (resultItems.length === 0) {
-    // BR-005: clear the partial text so the field is not left in a bad state.
-    await simulateTyping(textInput, "");
-    return {
-      status: "error",
-      message: `No search results found for "${value}"`,
-    };
-  }
-
-  // Match by the PRIMARY NAME — the part of aria-label before the first comma.
-  // Example: aria-label "Contoso Corp, Account" → primary name "Contoso Corp"
-  // (spec: lookup field write strategy — aria-label match)
-  const target = value.trim().toLowerCase();
-  let matchedResult = null;
-  const available = [];
-
-  for (const item of resultItems) {
-    const label = item.getAttribute("aria-label") ?? "";
-    const primaryName = label.split(",")[0].trim();
-    available.push(primaryName);
-    if (primaryName.toLowerCase() === target) {
-      matchedResult = item;
-    }
-  }
-
-  if (!matchedResult) {
-    // BR-005: clear the partial text before returning a warning.
-    await simulateTyping(textInput, "");
-    return {
-      status: "warning",
-      message: `No result matched "${value}". Available: ${available.join(", ")}`,
-    };
-  }
-
-  matchedResult.click();
-  return { status: "success" };
-}
-
-// ─── Strategy Registry ────────────────────────────────────────────────────────
-
-/**
- * Maps each fieldType string to its corresponding write strategy function.
- *
- * Why a registry object rather than a switch statement?
- *   The registry is easier to extend (add a new type = add one property) and
- *   each strategy can be independently tested.  (design D-2)
- */
-const PASTE_STRATEGIES = {
-  text:   pasteText,
-  choice: pasteChoice,
-  lookup: pasteLookup,
-};
-
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
 
 /**
  * Main entry point — called by the background service worker via
  * chrome.scripting.executeScript({ func: paWriterMain, args: [...] }).
+ *
+ * WHY ALL HELPERS ARE DEFINED INSIDE THIS FUNCTION:
+ *   Chrome serialises the injected function via `Function.prototype.toString()`
+ *   and evaluates that text in the PA page's isolated world.  Only the
+ *   function body is captured — any module-scope variables (PASTE_STRATEGIES,
+ *   pasteText, waitForElement, etc.) are NOT transferred and would throw
+ *   ReferenceError at runtime.  Defining every helper as an inner function
+ *   ensures the serialised text is fully self-contained, exactly the same
+ *   pattern used by `adoReaderMain` in ado-reader.js.  (design D-1)
  *
  * Iterates over enabled mappings, looks up each in `copiedData`, and calls
  * the appropriate write strategy.  Each field is wrapped in an independent
@@ -439,29 +70,238 @@ const PASTE_STRATEGIES = {
  * @returns {Promise<FieldResult[]>} One result per enabled mapping, in order.
  */
 async function paWriterMain(copiedData, mappings, overwriteMode) {
+
+  // ── MutationObserver Helpers ─────────────────────────────────────────────
+  //
+  // Defined as inner functions so they are included in the serialised
+  // function body when Chrome injects paWriterMain.  (design D-1, D-3)
+
+  /**
+   * Wait for a single DOM element matching `selector`.
+   * Resolves with the element or null on timeout.
+   *
+   * Why observe document.body?
+   *   Fluent UI renders choice dropdowns and lookup flyouts into detached
+   *   portal nodes at body level — NOT inside the field control.  We must
+   *   observe at body level to catch these insertions.  (design D-5)
+   */
+  function waitForElement(selector, timeoutMs) {
+    return new Promise((resolve) => {
+      const existing = document.querySelector(selector);
+      if (existing) { resolve(existing); return; }
+
+      let timer;
+      const observer = new MutationObserver(() => {
+        const el = document.querySelector(selector);
+        if (el) {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve(el);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      timer = setTimeout(() => { observer.disconnect(); resolve(null); }, timeoutMs);
+    });
+  }
+
+  /**
+   * Wait for one or more DOM elements matching `selector`.
+   * Resolves with a non-empty NodeList or an empty NodeList on timeout.
+   */
+  function waitForElements(selector, timeoutMs) {
+    return new Promise((resolve) => {
+      const existing = document.querySelectorAll(selector);
+      if (existing.length > 0) { resolve(existing); return; }
+
+      let timer;
+      const observer = new MutationObserver(() => {
+        const els = document.querySelectorAll(selector);
+        if (els.length > 0) {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve(els);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      timer = setTimeout(() => {
+        observer.disconnect();
+        resolve(document.querySelectorAll(selector));
+      }, timeoutMs);
+    });
+  }
+
+  // ── simulateTyping ──────────────────────────────────────────────────────
+  //
+  // Types `text` into `inputElement` in a way that triggers PowerApps'
+  // React synthetic event system.
+  //
+  // WHY:
+  //   A plain `input.value = x` does NOT fire React's change handler.
+  //   execCommand('insertText') fires a real InputEvent that React detects.
+  //   The native-setter fallback handles contexts where execCommand no-ops.
+  //   The 300ms settle delay lets PA fire Dataverse API calls before the
+  //   next interaction.  (design D-4)
+
+  function simulateTyping(inputElement, text) {
+    return new Promise((resolve) => {
+      inputElement.select();
+      document.execCommand("insertText", false, text);
+
+      if (inputElement.value !== text) {
+        // Native property setter — bypasses React's descriptor so the
+        // subsequent event dispatch triggers React's handler.
+        const nativeSet = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, "value"
+        ).set;
+        nativeSet.call(inputElement, text);
+        inputElement.dispatchEvent(new Event("input",  { bubbles: true }));
+        inputElement.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      setTimeout(resolve, 300);
+    });
+  }
+
+  // ── Field Write Strategies ───────────────────────────────────────────────
+  //
+  // Each strategy is an inner async function so it is self-contained in the
+  // serialised paWriterMain text.  (design D-1, D-2)
+
+  /**
+   * Write a value into a plain text input field.
+   * Selector: `[data-id="{schema}.fieldControl-text-box-text"]`
+   * BR-003: does not submit or save.
+   */
+  async function pasteText(fieldSchemaName, value, overwriteMode) {
+    const selector = "[data-id=\"" + fieldSchemaName + ".fieldControl-text-box-text\"]";
+    const input = document.querySelector(selector);
+    if (!input) return { status: "error", message: "Text input not found: " + selector };
+    if (overwriteMode === false && input.value !== "") {
+      return { status: "skipped", message: "Field already has a value (overwrite mode is off)" };
+    }
+    input.focus();
+    await simulateTyping(input, value);
+    return { status: "success" };
+  }
+
+  /**
+   * Write a value into a choice (option-set / combobox) field.
+   * Selector: `[data-id="{schema}.fieldControl-option-set-select"]`
+   *
+   * CRITICAL: options are rendered in a Fluent UI portal detached from the
+   * combobox element — query `[role="option"]` from document root.  (design D-5)
+   */
+  async function pasteChoice(fieldSchemaName, value, overwriteMode) {
+    const selector = "[data-id=\"" + fieldSchemaName + ".fieldControl-option-set-select\"]";
+    const combobox = document.querySelector(selector);
+    if (!combobox) return { status: "error", message: "Choice combobox not found: " + selector };
+    if (overwriteMode === false && combobox.title && combobox.title !== "---") {
+      return { status: "skipped", message: "Field already has a value (overwrite mode is off)" };
+    }
+    combobox.click();
+    const options = await waitForElements("[role=\"option\"]", 3000);
+    if (options.length === 0) return { status: "error", message: "No options appeared after opening dropdown" };
+
+    const target = value.trim().toLowerCase();
+    let matchedOption = null;
+    const available = [];
+    for (const opt of options) {
+      const text = opt.textContent.trim();
+      available.push(text);
+      if (text.toLowerCase() === target) matchedOption = opt;
+    }
+    if (!matchedOption) {
+      return { status: "warning", message: "No option matched \"" + value + "\". Available: " + available.join(", ") };
+    }
+    matchedOption.click();
+    return { status: "success" };
+  }
+
+  /**
+   * Write a value into a lookup (relationship) field.
+   * Prefix: `{schema}.fieldControl-LookupResultsDropdown_{schema}`
+   *
+   * Delete-button presence indicates an existing value (design D-6).
+   * BR-005: clear typed text before returning error/warning.
+   */
+  async function pasteLookup(fieldSchemaName, value, overwriteMode) {
+    const prefix = fieldSchemaName + ".fieldControl-LookupResultsDropdown_" + fieldSchemaName;
+    const deleteButtonSelector = "[data-id=\"" + prefix + "_selected_tag_delete\"]";
+    const textInputSelector    = "[data-id=\"" + prefix + "_textInputBox_with_filter_new\"]";
+
+    const deleteButton = document.querySelector(deleteButtonSelector);
+    if (overwriteMode === false && deleteButton) {
+      return { status: "skipped", message: "Field already has a value (overwrite mode is off)" };
+    }
+    if (deleteButton) {
+      deleteButton.click();
+      const appeared = await waitForElement(textInputSelector, 3000);
+      if (!appeared) return { status: "error", message: "Text input did not appear after clearing existing value" };
+    }
+
+    const textInput = document.querySelector(textInputSelector);
+    if (!textInput) return { status: "error", message: "Lookup text input not found: " + textInputSelector };
+
+    textInput.focus();
+    textInput.click();
+    await simulateTyping(textInput, value);
+
+    const resultsContainerSelector = "[data-id=\"" + prefix + "_resultsContainer\"]";
+    const resultItems = await waitForElements(resultsContainerSelector, 5000);
+    if (resultItems.length === 0) {
+      await simulateTyping(textInput, "");
+      return { status: "error", message: "No search results found for \"" + value + "\"" };
+    }
+
+    const target = value.trim().toLowerCase();
+    let matchedResult = null;
+    const available = [];
+    for (const item of resultItems) {
+      const ariaLabel = item.getAttribute("aria-label") || "";
+      const primaryName = ariaLabel.split(",")[0].trim();
+      available.push(primaryName);
+      if (primaryName.toLowerCase() === target) matchedResult = item;
+    }
+    if (!matchedResult) {
+      await simulateTyping(textInput, "");
+      return { status: "warning", message: "No result matched \"" + value + "\". Available: " + available.join(", ") };
+    }
+    matchedResult.click();
+    return { status: "success" };
+  }
+
+  // ── Strategy Registry ────────────────────────────────────────────────────
+  //
+  // Maps fieldType → strategy function.  Defined inside paWriterMain so it
+  // is included in the serialised injection.  (design D-2)
+
+  const PASTE_STRATEGIES = {
+    text:   pasteText,
+    choice: pasteChoice,
+    lookup: pasteLookup,
+  };
+
+  // ── Orchestration loop ───────────────────────────────────────────────────
+
   const results = [];
+  const enabledMappings = (mappings ?? []).filter(function(m) { return m.enabled; });
 
-  // Only process enabled mappings — disabled ones are silently excluded.
-  const enabledMappings = (mappings ?? []).filter(m => m.enabled);
-
-  // Build a lookup map from fieldId → CopiedFieldData for O(1) access.
+  // Build a fieldId → CopiedFieldData lookup map for O(1) access.
   const dataByFieldId = {};
   for (const entry of (copiedData ?? [])) {
     dataByFieldId[entry.fieldId] = entry;
   }
 
   for (const mapping of enabledMappings) {
-    // Per-field try/catch: a strategy failure must NOT abort the loop. (BR-002)
+    // Per-field try/catch — one failure must NOT abort the loop. (BR-002)
     try {
       const copied = dataByFieldId[mapping.id];
-
       if (!copied) {
-        // No matching data was captured from ADO for this mapping.
         results.push({
           fieldId: mapping.id,
           label:   mapping.label,
           status:  "error",
-          message: `No copied data found for field "${mapping.id}"`,
+          message: "No copied data found for field \"" + mapping.id + "\"",
         });
         continue;
       }
@@ -472,12 +312,11 @@ async function paWriterMain(copiedData, mappings, overwriteMode) {
           fieldId: mapping.id,
           label:   mapping.label,
           status:  "error",
-          message: `Unknown field type "${mapping.fieldType}"`,
+          message: "Unknown field type \"" + mapping.fieldType + "\"",
         });
         continue;
       }
 
-      // Call the strategy — returns { status, message? }.
       const strategyResult = await strategy(
         mapping.fieldSchemaName,
         copied.value,
@@ -491,7 +330,7 @@ async function paWriterMain(copiedData, mappings, overwriteMode) {
       });
 
     } catch (err) {
-      // Unexpected error in strategy — record it and continue. (BR-002)
+      // Unexpected error — record and continue. (BR-002)
       results.push({
         fieldId: mapping.id,
         label:   mapping.label ?? mapping.id,
