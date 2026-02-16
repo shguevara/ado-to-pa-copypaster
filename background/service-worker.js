@@ -44,7 +44,13 @@
 //   In Node.js (Vitest), it is undefined — the guard prevents a ReferenceError
 //   that would abort the import and break the detectPageType tests.
 if (typeof importScripts === "function") {
-  importScripts("scripts/ado-reader.js");
+  // Why "../scripts/ado-reader.js" and not "scripts/ado-reader.js"?
+  //   importScripts resolves paths relative to the service worker script's own
+  //   URL — not the extension root.  The SW lives at background/service-worker.js,
+  //   so a bare "scripts/..." path resolves to background/scripts/... (wrong).
+  //   The "../" prefix steps up from background/ to the extension root first,
+  //   giving the correct chrome-extension://<id>/scripts/ado-reader.js path.
+  importScripts("../scripts/ado-reader.js");
 }
 
 // ─── Page Type Detection ─────────────────────────────────────────────────────
