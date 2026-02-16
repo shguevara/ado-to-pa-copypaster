@@ -93,15 +93,30 @@ function validateImportData(parsed) {
 //   Same pattern as service-worker.js. (design.md Decision 1)
 if (typeof chrome !== "undefined") {
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.action !== "TAB_CHANGED") return;
-
     // Guard: if Alpine hasn't registered the store yet (extremely unlikely but
-    // possible in theory), drop this message safely.  The next tab-switch event
-    // will re-sync pageType; no persistent stale state is introduced.
+    // possible in theory), drop this message safely.
     const store = Alpine.store("app");
     if (!store) return;
 
-    store.pageType = message.pageType;
+    if (message.action === "TAB_CHANGED") {
+      store.pageType = message.pageType;
+      return;
+    }
+
+    if (message.action === "ELEMENT_PICKED") {
+      // ELEMENT_PICKED is forwarded here from the SW after the injected
+      // element-picker.js calls chrome.runtime.sendMessage in the PA tab.
+      //
+      // Why direct property assignment (not a store method) is correct here:
+      //   This is plain JS code, not an Alpine directive expression.  The CSP
+      //   constraint (SPEC.md §3.2) only applies to string expressions evaluated
+      //   by Alpine's parser.  Direct assignment in plain JS triggers Alpine's
+      //   reactivity normally — same pattern as `store.pageType = message.pageType`
+      //   on the TAB_CHANGED line above.  (design D-4)
+      store.pickerActive = false;
+      store.pickerResult = { schemaName: message.schemaName };
+      return;
+    }
   });
 }
 
@@ -126,6 +141,12 @@ function adminMappingForm() {
     fieldSchemaName: "",
     fieldType:       "text",  // default to simplest field type
     formError:       "",      // non-empty string → shown as an inline error message
+
+    // pickerWarning — shown inline below the Field Schema Name input when the
+    // element picker runs but cannot determine a schema name (e.g. clicked an
+    // element with no data-id on any ancestor).  Cleared when the form opens
+    // or when a successful pick result populates fieldSchemaName.  (design D-6)
+    pickerWarning:   "",
 
     // init() is called once by Alpine when this x-data component is mounted.
     // It sets up a $watch so the form resets itself every time showMappingForm
@@ -154,8 +175,42 @@ function adminMappingForm() {
           this.fieldSchemaName = "";
           this.fieldType       = "text";
         }
-        // Clear any stale validation error from the previous open.
-        this.formError = "";
+        // Clear any stale validation error and picker warning from the previous
+        // open so the form always starts in a clean state.
+        this.formError     = "";
+        this.pickerWarning = "";
+      });
+
+      // React to ELEMENT_PICKED results forwarded through the store.
+      //
+      // Why watch $store.app.pickerResult rather than receiving the message
+      // directly here?
+      //   The ELEMENT_PICKED message arrives in the module-level onMessage
+      //   listener (outside Alpine), which can only write to the global store.
+      //   There is no direct channel from the listener to this local component.
+      //   Routing through the store is the established pattern here.  (design D-4)
+      //
+      // Why the object wrapper ({ schemaName }) rather than a raw string?
+      //   pickerResult starts as null and the pick can return schemaName: null.
+      //   If we stored the raw string, null → null would not fire the $watch.
+      //   An object wrapper means null → { schemaName: null } always signals
+      //   a freshly returned result, distinguishable from the initial null state.
+      //   (design D-4)
+      this.$watch("$store.app.pickerResult", (result) => {
+        if (!result) return; // initial null on store init — ignore
+
+        if (result.schemaName) {
+          // Successful pick — populate the draft field and clear any prior warning.
+          this.fieldSchemaName = result.schemaName;
+          this.pickerWarning   = "";
+        } else {
+          // Picker ran but could not extract a schema name (no data-id found
+          // on any ancestor).  Leave fieldSchemaName unchanged and show a
+          // helpful warning guiding the user to try a different element.
+          this.pickerWarning =
+            "Could not determine field schema name — " +
+            "try clicking directly on the field input or label";
+        }
       });
     },
 
@@ -197,6 +252,39 @@ function adminMappingForm() {
         fieldSchemaName: this.fieldSchemaName.trim(),
         fieldType:       this.fieldType,
       });
+    },
+
+    // startPicker() — inject element-picker.js into the active PA tab.
+    //
+    // We set pickerActive = true immediately (optimistic update) so the button
+    // label flips to "Cancel Pick" without waiting for the SW round-trip.  If
+    // injection fails, we revert the flag and show an error via pickerWarning.
+    // (design D-5; tasks.md §5.3)
+    startPicker() {
+      this.$store.app.pickerActive = true;
+      chrome.runtime.sendMessage({ action: "START_ELEMENT_PICKER" }, (response) => {
+        if (chrome.runtime.lastError || !response?.success) {
+          // Injection failed — revert the optimistic pickerActive flag.
+          this.$store.app.pickerActive = false;
+          this.pickerWarning =
+            response?.error ??
+            chrome.runtime.lastError?.message ??
+            "Failed to start picker";
+        }
+        // On success, pickerActive stays true until ELEMENT_PICKED arrives
+        // (handled in the module-level onMessage listener → store → $watch above).
+      });
+    },
+
+    // cancelPicker() — remove the picker overlay from the PA tab and reset state.
+    //
+    // Fire-and-forget: we don't wait for a response because the desired end
+    // state (no overlay, pickerActive: false) is achieved regardless of whether
+    // the executeScript in the SW succeeds.  The overlay may already be gone if
+    // the user clicked or pressed Escape inside the PA tab.
+    cancelPicker() {
+      this.$store.app.pickerActive = false;
+      chrome.runtime.sendMessage({ action: "CANCEL_ELEMENT_PICKER" });
     },
   };
 }
@@ -247,6 +335,14 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     editingMapping:     null,   // FieldMapping | null (null = "add new" mode)
     showMappingForm:    false,
     pickerActive:       false,
+
+    // pickerResult is set to { schemaName } (an object, never the raw value)
+    // when ELEMENT_PICKED arrives.  The object wrapper distinguishes "no result
+    // yet" (null) from "picker returned null schema name" ({ schemaName: null }).
+    // The adminMappingForm $watch reacts to any non-null value here.
+    // (design D-4)
+    pickerResult: null,
+
     testSelectorResult: null,   // { found, tagName?, error? } | null
     testSelectorLoading: false,
     importMessage:      null,   // { type: "success"|"error", text } | null
@@ -258,6 +354,19 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     // literals.  Wrapping the logic in store methods keeps all null-guards in
     // JavaScript where they work correctly, and the directive expressions stay
     // simple method calls that the CSP parser handles without issue.
+
+    // Returns true when "Pick from Page" should be disabled.
+    // A method rather than inline `pageType !== 'pa'` because the CSP parser
+    // does not support the `!==` operator in all expression positions. Using
+    // a method call is unambiguously supported.  (SPEC.md §3.2)
+    isPickerStartDisabled() { return this.pageType !== "pa"; },
+
+    // Setter methods for picker state — required for mutations triggered from
+    // HTML directive expressions.  The Alpine CSP build silently drops direct
+    // assignment expressions ($store.app.pickerActive = true) in event handler
+    // directives.  Method calls are fully supported.  (design D-5)
+    setPickerActive(value) { this.pickerActive = value; },
+    setPickerResult(obj)   { this.pickerResult = obj;   },
 
     // Returns the mappings array, or an empty array if settings hasn't loaded yet.
     getMappings() {
@@ -447,7 +556,12 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
         // Successful copy — store all field results (success + blank + error)
         // so the user can see exactly which fields were read and their status.
         this.fieldResults  = response.results ?? [];
-        this.hasCopiedData = true;
+        // hasCopiedData is true only when at least one result is not an error.
+        // "blank" results still have copyable data (an empty value for the PA
+        // field), so they count as valid paste targets. Pure all-error results
+        // (e.g. every selector failed) mean there is nothing meaningful to paste.
+        // (design D-7; COMMENTS.md 🟡 item 1)
+        this.hasCopiedData = (response.results ?? []).some(r => r.status !== "error");
         this.copyStatus    = "done";
       } else {
         // Copy failed (not on ADO page, injection error, etc.) — surface as a

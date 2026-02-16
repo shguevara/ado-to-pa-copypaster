@@ -396,6 +396,117 @@ if (typeof chrome !== "undefined") {
       return true; // keep channel open for the async IIFE above
     }
 
+    // ── START_ELEMENT_PICKER ──────────────────────────────────────────────────
+    // Async: inject element-picker.js into the active PA tab so the user can
+    // click a field element and have its schema name captured.
+    //
+    // Why `files` rather than `func` (the pattern used for ado-reader.js)?
+    //   element-picker.js has DOM side-effects (overlay creation, event
+    //   listeners) that must run in page scope.  We don't need a return value
+    //   from it.  The `func` pattern is for pure-function injection that
+    //   returns a value from the page context back to the SW.  Using `files`
+    //   is simpler and more appropriate for side-effect-only injection.
+    //   (design D-3; tasks.md §3.1 rationale comment)
+    if (message.action === "START_ELEMENT_PICKER") {
+      // Guard: element-picker.js is only useful on a PA page — PA forms
+      // use data-id attributes for field identification.  On ADO or other
+      // pages there are no PA field controls to pick from.
+      if (currentPageType !== "pa") {
+        sendResponse({ success: false, error: "Not on a PowerApps page." });
+        return false;
+      }
+
+      (async () => {
+        try {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = activeTab?.id;
+          if (!tabId) {
+            sendResponse({ success: false, error: "No active tab found." });
+            return;
+          }
+
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ["scripts/element-picker.js"],
+          });
+
+          sendResponse({ success: true });
+        } catch (err) {
+          console.error("[SW] START_ELEMENT_PICKER: executeScript failed:", err.message);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+
+      return true; // keep channel open for the async IIFE above
+    }
+
+    // ── ELEMENT_PICKED ────────────────────────────────────────────────────────
+    // The injected element-picker.js calls chrome.runtime.sendMessage when the
+    // user clicks an element (or if extractSchemaName returns null).  This SW
+    // handler forwards the result to the side panel.
+    //
+    // Why two-hop routing (injected script → SW → side panel)?
+    //   Injected scripts live in the page's isolated world and can only reach
+    //   the extension via chrome.runtime.sendMessage to the background.  There
+    //   is no direct channel from an injected script to the side panel.  This
+    //   two-hop routing is the same pattern used for TAB_CHANGED push
+    //   notifications in this extension.  (design D-3)
+    if (message.action === "ELEMENT_PICKED") {
+      // Forward to the side panel.  Wrap in try/catch — if the side panel is
+      // closed, sendMessage throws "Receiving end does not exist" and we should
+      // not let that crash the SW.  (same defensive pattern as TAB_CHANGED)
+      try {
+        chrome.runtime.sendMessage({
+          action:     "ELEMENT_PICKED",
+          schemaName: message.schemaName,
+        });
+      } catch {
+        // Side panel is closed — nothing to forward. Safe to ignore.
+      }
+      return false; // no async response needed back to the injected script
+    }
+
+    // ── CANCEL_ELEMENT_PICKER ─────────────────────────────────────────────────
+    // The side panel's "Cancel Pick" button sends this message.  We execute an
+    // inline function in the active tab to remove the picker overlay (if it
+    // still exists) and reset the page to its normal state.
+    //
+    // Why `func` here rather than `files`?
+    //   We need to execute a tiny one-liner in the tab and the result is
+    //   unimportant.  The overlay DOM node is already in the page from the
+    //   START_ELEMENT_PICKER injection — we just need to remove it.
+    //   Using `func` for this minimal teardown avoids injecting a second copy
+    //   of element-picker.js (which would re-register all the listeners).
+    if (message.action === "CANCEL_ELEMENT_PICKER") {
+      (async () => {
+        try {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = activeTab?.id;
+          if (!tabId) {
+            sendResponse({ success: false, error: "No active tab found." });
+            return;
+          }
+
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            // Remove the overlay if it exists.  Optional chaining is safe here
+            // because this runs as a serialised function string in the page
+            // context (not in an Alpine directive expression).
+            func: () => { document.getElementById("ado-pa-picker-overlay")?.remove(); },
+          });
+
+          // Respond success regardless of whether the overlay was present.
+          // The desired end-state (no overlay) is achieved either way.
+          sendResponse({ success: true });
+        } catch (err) {
+          console.error("[SW] CANCEL_ELEMENT_PICKER: executeScript failed:", err.message);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+
+      return true; // keep channel open for the async IIFE above
+    }
+
     // ── GET_COPIED_DATA ───────────────────────────────────────────────────────
     // Async: read CopiedFieldData[] from session storage and return to caller.
     // Returns { data: CopiedFieldData[] } or { data: null } if nothing stored.

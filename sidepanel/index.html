@@ -382,15 +382,48 @@
                 placeholder="e.g. cr123_lineofbusiness"
               />
               <!--
-                "Pick from Page" (Phase 8) and "Test Field" (Phase 9) buttons
-                are present but disabled as non-functional placeholders so the
-                layout slot is reserved and the buttons are discoverable in the
-                UI. They will be wired in later phases. (design Non-Goals)
+                "Pick from Page" / "Cancel Pick" (Phase 8) — mutually exclusive.
+                x-show toggles between them based on $store.app.pickerActive.
+
+                "Pick from Page": shown when picker is NOT active (SPEC.md §7.3).
+                  :disabled uses isPickerStartDisabled() — a store helper that
+                  returns true when pageType !== 'pa'.  A helper is required
+                  because the CSP expression parser does not support the !==
+                  operator in :disabled bindings.  (design D-5; SPEC §3.2)
+
+                "Cancel Pick": shown when picker IS active.
+                  Clicking it calls cancelPicker() (local form method, task 5.3)
+                  which resets pickerActive and sends CANCEL_ELEMENT_PICKER to
+                  the SW so the overlay is removed from the PA tab.
               -->
-              <button class="btn btn--small btn--secondary" disabled title="Available in Phase 8">Pick from Page</button>
+              <!-- Pick from Page — shown when picker is NOT active (SPEC.md §7.3) -->
+              <button
+                class="btn btn--small btn--secondary"
+                x-show="!$store.app.pickerActive"
+                :disabled="$store.app.isPickerStartDisabled()"
+                title="Navigate to a PowerApps form first"
+                @click="startPicker()"
+              >Pick from Page</button>
+
+              <!-- Cancel Pick — shown when picker IS active -->
+              <button
+                class="btn btn--small btn--secondary"
+                x-show="$store.app.pickerActive"
+                @click="cancelPicker()"
+              >Cancel Pick</button>
+
               <button class="btn btn--small btn--secondary" disabled title="Available in Phase 9">Test Field</button>
             </div>
           </div>
+
+          <!--
+            Picker warning — shown when element-picker.js returned null schema
+            name (no data-id found on any ancestor of the clicked element).
+            x-show hides it when pickerWarning is empty.
+            x-text sets the message text safely (no innerHTML injection risk).
+            (design D-6; tasks.md §6.2)
+          -->
+          <p class="inline-warning" x-show="pickerWarning" x-text="pickerWarning"></p>
 
           <!-- Field Type select -->
           <div class="form-group">
