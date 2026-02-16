@@ -1,3 +1,212 @@
+# Retrospective — Phase 7: ADO Reader + Copy Initiative Flow
+
+**Date**: 2026-02-15
+**Commits**: `c733e45` (implementation) → `8e468f5` (fix: importScripts path)
+
+---
+
+## What went well
+
+Phase 7 was the first phase that touched Chrome script injection — a higher-risk
+area than pure storage or UI work — and it landed with only one runtime bug.
+
+Specific highlights:
+
+- **TDD applied to injectable code**: `adoReaderMain` is executed inside the ADO
+  page's isolated world by Chrome, making it impossible to test end-to-end without
+  a real ADO tab. The mock-doc strategy (design D-3) made the function fully
+  testable in Node.js by injecting a plain object with `querySelector` and `location`
+  properties. All 12 tests were green before the service-worker integration was
+  wired. When the extension was loaded in Chrome, it worked first try.
+
+- **CSP-safe helper pattern applied upfront**: Lessons from phases 3 and 5 were
+  applied directly — `isCopyDisabled()` and `hasCopyResults()` were written as store
+  methods from the start rather than using `||` / `&&` inline in directives. Zero
+  CSP parser errors on first load.
+
+- **BR-002 per-field isolation is clean**: The `try/catch` wrapping each field in
+  `adoReaderMain`'s loop, combined with the inner `readField()` function, means
+  a broken selector on one field never blocks the others. The design of returning
+  a typed `status:"error"` result (rather than filtering the field out) gives the
+  user visibility into exactly which fields failed and why.
+
+---
+
+## What went wrong
+
+### Bug 1 — `importScripts` path resolved relative to the SW, not the extension root
+
+**Symptom**: On first extension reload after implementation, the service worker
+failed to start:
+
+```
+Uncaught NetworkError: Failed to execute 'importScripts' on 'WorkerGlobalScope':
+The script at 'chrome-extension://.../background/scripts/ado-reader.js' failed to load.
+Service worker registration failed. Status code: 15
+```
+
+**Root cause**: The design doc stated "Chrome resolves relative to the extension
+root for SW scripts" — this was incorrect. `importScripts` resolves paths relative
+to the service worker script's own URL. Since the SW lives at
+`background/service-worker.js`, `importScripts("scripts/ado-reader.js")` resolved
+to `background/scripts/ado-reader.js` instead of the intended `scripts/ado-reader.js`
+at the extension root.
+
+**Fix**: Changed the path to `"../scripts/ado-reader.js"` — stepping up from
+`background/` to the extension root before entering `scripts/`.
+
+**Action**: Any `importScripts` call in a service worker that is not at the
+extension root must use a path relative to the SW's own location. A SW at
+`background/service-worker.js` needs `"../"` to reach the extension root.
+Document this in the design whenever `importScripts` is used from a subdirectory.
+
+---
+
+### Bug 2 — Vitest v2 silently skipped ado-reader tests due to jsdom auto-detection
+
+**Symptom**: Running `npm test` showed 25 tests from the two existing test files
+passing, but `tests/ado-reader.test.js` appeared nowhere in the output — not
+"failed", simply absent. When running that file alone: "no tests".
+The runner reported one unhandled error: `Cannot find package 'jsdom'`.
+
+**Root cause**: `scripts/ado-reader.js` contains `doc = document` (default parameter)
+and `window.location` (function body fallback). Vitest v2's static source analysis
+detected these browser globals in an imported file and attempted to switch the test
+worker to a `jsdom` environment. Since `jsdom` is not installed, the worker's setup
+threw before the test file was collected. The failure mode was silent — the file
+simply disappeared from the run rather than appearing as a test error.
+
+The existing tests (`detect-page-type.test.js`, `import-validator.test.js`) were
+unaffected because their imported files either guard DOM references with
+`typeof` checks or contain no DOM globals at all.
+
+**Fix**: Two changes together:
+1. Added `vitest.config.js` with `environment: "node"` to lock the global default.
+2. Added `@vitest-environment node` annotation to `tests/ado-reader.test.js`.
+   The explicit per-file annotation takes priority over any detection heuristic.
+
+**Action**: Any test file that imports a module containing `document` or `window`
+references — even inside function bodies — should carry a `@vitest-environment node`
+annotation. This is now a project convention: add the annotation whenever the
+imported source file operates on browser globals and uses the mock-doc pattern
+rather than a real DOM.
+
+---
+
+## Summary table
+
+| # | What happened | Root cause | Fix | Action going forward |
+|---|---|---|---|---|
+| 1 | `importScripts` 404 on extension load | Paths in `importScripts` are SW-relative, not extension-root-relative | Changed to `"../scripts/ado-reader.js"` | SW not at root: always prefix with `"../"` to reach extension root; verify path in Chrome error message immediately |
+| 2 | `ado-reader.test.js` silently skipped; jsdom error | Vitest v2 detected `document`/`window` in imported file and tried to load jsdom | Added `@vitest-environment node` to test file + `vitest.config.js` | Add `@vitest-environment node` to any test file importing a module that references browser globals |
+
+---
+
+# Retrospective — Phase 6: Export / Import
+
+**Date**: 2026-02-15
+**Commits**: `3cd5777` (TDD red→green) → `023573b` (activate buttons) → `6ae8827` (mark tasks complete) → `ca99982` (fix: review items)
+
+---
+
+## What went well
+
+Phase 6 was the cleanest phase to date. No bugs were found in manual verification — all
+8 MT flows passed on first load. The implementation landed in two clean commits before
+the fix commit, and all five design decisions from `design.md` were correctly applied
+without deviation.
+
+Specific highlights:
+
+- **TDD was strictly observed**: 8 failing tests were written and confirmed red before a
+  single line of production code was written. The test suite became the spec executable.
+- **`validateImportData` at module scope**: extracting the validation function outside the
+  Alpine store made it trivially testable from Node.js with zero test infrastructure
+  overhead. The same conditional-export pattern (`if (typeof module !== "undefined")`)
+  already established by `detectPageType` in `service-worker.js` was reused cleanly.
+- **All 5 design decisions applied correctly**: in-memory export (no extra `GET_SETTINGS`
+  round-trip), key-presence check for `overwriteMode`, immediate `value = ""` reset for
+  same-file re-selection, `importMessage` cleared at attempt start, and helper methods
+  to work around CSP parser limits.
+
+---
+
+## What was caught in review
+
+### Issue 1 — `SAVE_SETTINGS` failure during import showed "success" (🔴 MUST FIX)
+
+**Symptom**: If `SAVE_SETTINGS` failed (e.g. runtime error or service worker rejection),
+the subsequent `GET_SETTINGS` reloaded old data, leaving the mapping list unchanged —
+but `importMessage` was unconditionally set to `{ type: "success", text: "Mappings imported
+successfully." }`. The user saw a green success banner while nothing was saved.
+
+**Root cause**: The Promise wrapping `SAVE_SETTINGS` called `resolve()` unconditionally
+in the callback regardless of the outcome. The success message was then always set after
+the `await`, with no guard for the failure case. SPEC.md §8.5 requires an inline error
+when `SAVE_SETTINGS` fails.
+
+**Fix**: Added a `saveSucceeded = true` flag in the Promise closure. Both error branches
+(`chrome.runtime.lastError` and `!response?.success`) set it to `false`. A guard after
+the `await` returns early with an inline error message if `saveSucceeded` is false.
+
+**Action**: Every `SAVE_SETTINGS` call that must give user-visible feedback on failure
+should use the `saveSucceeded` callback-flag pattern established here. This is now the
+third SAVE_SETTINGS caller in `app.js` (`addMapping`, `saveSettings`, `importMappings`)
+— the pattern is now a project convention.
+
+---
+
+### Issue 2 — Required-field tests covered only 2 of 6 fields; §9.2 100% coverage gap (🟡 SHOULD FIX)
+
+**Symptom**: Tests 1.5 (`fieldSchemaName` missing) and 1.6 (`label` missing) were the
+only per-field tests. The remaining four required fields — `id`, `adoSelector`, `fieldType`
+(absent key), and `enabled` — had no corresponding tests. SPEC.md §9.2 explicitly requires
+100% validation rule coverage.
+
+**Root cause**: The TDD approach correctly specified 8 test cases for the 8 tasks in
+section 1 of `tasks.md`. Tasks 1.5 and 1.6 were written against the two most
+"interesting" required fields (the ones most likely to be absent in real import files),
+but the other four were not in the task list. Because `validateImportData` uses a
+deterministic `for...of` loop over `REQUIRED_FIELDS`, any single-field test exercises
+the same code path — but that is a correctness argument, not a coverage argument.
+SPEC.md's rule is absolute.
+
+**Fix**: Tests 1.9–1.12 added for `id`, `adoSelector`, `fieldType` (absent key, distinct
+from 1.7's invalid-value case), and `enabled`.
+
+**Action**: When writing TDD tests for a loop over a fixed array of keys (e.g.
+`REQUIRED_FIELDS`), write one test per array entry — even if the code path is identical.
+The tests prove the array is complete, not just that the loop fires. List all entries in
+the task breakdown upfront.
+
+---
+
+### Bonus: Empty-string label accepted by `== null` guard (🟢 NICE TO HAVE, addressed)
+
+**Symptom**: A mapping entry with `label: ""` passed the required-field check because
+`"" != null` and `"label" in entry`. The spec defines `label` as "non-empty string"
+(SPEC.md §4.4), so an empty string is semantically missing.
+
+**Fix**: Extended the guard from `entry[field] == null` to also check `|| entry[field] === ""`
+so that empty strings are rejected at Rule 3. Test 1.13 added. The `enabled` field is
+boolean so `=== ""` never fires on it.
+
+**Action**: When a spec defines a field as "non-empty string", the required-field guard
+must include an empty-string check — `== null` alone is insufficient. Note this in the
+next phase's task template wherever string fields are validated.
+
+---
+
+## Summary table
+
+| # | What happened | Root cause | Fix | Action going forward |
+|---|---|---|---|---|
+| 1 | SAVE_SETTINGS failure silently showed "success" | `resolve()` called unconditionally; no guard on failure path | `saveSucceeded` flag + early return on failure | Use `saveSucceeded` callback-flag pattern for all SAVE_SETTINGS callers that surface user feedback |
+| 2 | Only 2/6 required fields tested; §9.2 coverage gap | Task breakdown listed 2 representative fields, not all 6 | Tests 1.9–1.12 added | Write one test per REQUIRED_FIELDS entry, not just representative ones |
+| 3 | `label: ""` passed required-field check | `== null` does not catch empty strings | `=== ""` guard added; test 1.13 | For "non-empty string" spec fields, always include `=== ""` in the required-field check |
+
+---
+
 # Retrospective — Phase 5: Admin Tab CRUD
 
 **Date**: 2026-02-15
