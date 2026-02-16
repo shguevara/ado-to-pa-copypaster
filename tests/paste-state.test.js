@@ -4,23 +4,18 @@
  * Unit tests for paste state management in sidepanel/app.js.
  *
  * WHY @vitest-environment node?
- *   The pure functions (computeIsPasteDisabled, computeHasPasteResults) and
- *   the async action runner (_runPasteInitiative) are module-scope extractions
- *   that have no browser dependencies — they can be tested cleanly in Node.
+ *   The pure functions (computeIsPasteDisabled) and the async action runner
+ *   (_runPasteInitiative) are module-scope extractions that have no browser
+ *   dependencies — they can be tested cleanly in Node.
  *   (Same pattern as validateImportData in import-validator.test.js.)
- *
- * TDD ORDER:
- *   Written BEFORE the corresponding implementations.  Running `npm test`
- *   after creating this file (but before tasks 7.2–7.5) must produce failures.
- *   After tasks 7.2–7.5 all tests must pass.
  *
  * WHAT IS TESTED:
  *   - computeIsPasteDisabled: disabled when pageType !== "pa" OR hasCopiedData !== true
- *   - computeHasPasteResults: true when pasteStatus === "done" AND results non-empty
- *   - _runPasteInitiative: state transitions (pasting → done), result population,
- *     and error-sentinel entry for success:false responses
+ *   - _runPasteInitiative: state transitions (pasting → done), updateAfterPaste
+ *     delegation, and error-sentinel entry for success:false responses
  *
  * WHAT IS NOT TESTED:
+ *   - computeHasPasteResults (removed in Phase 11 — function deleted from app.js)
  *   - Alpine store mounting (requires a browser + Alpine.js)
  *   - The chrome.runtime.onMessage wiring
  */
@@ -28,7 +23,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   computeIsPasteDisabled,
-  computeHasPasteResults,
   _runPasteInitiative,
 } from "../sidepanel/app.js";
 
@@ -60,57 +54,35 @@ describe("computeIsPasteDisabled", () => {
 
 });
 
-// ── computeHasPasteResults ─────────────────────────────────────────────────────
-
-describe("computeHasPasteResults", () => {
-
-  it("returns false when pasteStatus is 'idle'", () => {
-    expect(computeHasPasteResults("idle", [{ fieldId: "a", status: "success" }])).toBe(false);
-  });
-
-  it("returns false when pasteStatus is 'pasting'", () => {
-    expect(computeHasPasteResults("pasting", [{ fieldId: "a", status: "success" }])).toBe(false);
-  });
-
-  it("returns false when pasteStatus is 'done' but pasteResults is empty", () => {
-    expect(computeHasPasteResults("done", [])).toBe(false);
-  });
-
-  it("returns true when pasteStatus is 'done' and pasteResults is non-empty", () => {
-    const results = [{ fieldId: "a", label: "Title", status: "success" }];
-    expect(computeHasPasteResults("done", results)).toBe(true);
-  });
-
-  it("returns true with multiple results", () => {
-    const results = [
-      { fieldId: "a", status: "success" },
-      { fieldId: "b", status: "skipped" },
-    ];
-    expect(computeHasPasteResults("done", results)).toBe(true);
-  });
-
-  it("returns true even when the only result is an error sentinel", () => {
-    // The error sentinel (fieldId: '__error__') is still a result and should be shown.
-    const results = [{ fieldId: "__error__", label: "Error", status: "error", message: "Not on a PA page." }];
-    expect(computeHasPasteResults("done", results)).toBe(true);
-  });
-
-});
-
 // ── _runPasteInitiative ────────────────────────────────────────────────────────
+//
+// Phase 11 update: _runPasteInitiative now calls state.updateAfterPaste(results)
+// instead of directly mutating state.pasteResults.  The mock store therefore
+// needs the updateAfterPaste method rather than a pasteResults property.
+// (design D-4, D-5; task 1.4)
 
 describe("_runPasteInitiative", () => {
 
   /**
    * Build a minimal mock store state object with the paste-related properties.
-   * The real store has many more properties; we only need the ones that
-   * _runPasteInitiative reads or writes.
+   *
+   * Phase 11 change: `pasteResults` replaced by `lastPasteResults` and
+   * `updateAfterPaste(results)` method.  The real store's updateAfterPaste
+   * method sets lastPasteResults, updates lastOperation, and re-derives
+   * fieldUIStates — here we just capture the argument for assertion.
    */
   function makeMockStore(overrides = {}) {
-    return {
-      pasteStatus:   overrides.pasteStatus   ?? "idle",
-      pasteResults:  overrides.pasteResults  ?? [],
+    const store = {
+      pasteStatus:      overrides.pasteStatus      ?? "idle",
+      lastPasteResults: overrides.lastPasteResults ?? null,
     };
+    // updateAfterPaste is a vi.fn() so tests can assert it was called with
+    // the correct argument.  The implementation also sets lastPasteResults
+    // for convenience in tests that need to read the final value.
+    store.updateAfterPaste = vi.fn(function(results) {
+      store.lastPasteResults = results;
+    });
+    return store;
   }
 
   /**
@@ -126,8 +98,6 @@ describe("_runPasteInitiative", () => {
       lastError,
       sendMessage: vi.fn((msg, callback) => {
         // Simulate the async callback from the service worker.
-        // The sendMessage API is callback-based; _runPasteInitiative wraps it
-        // in a Promise.  We call the callback synchronously here for simplicity.
         callback(response);
       }),
     };
@@ -142,7 +112,6 @@ describe("_runPasteInitiative", () => {
     const chromeRuntime = {
       lastError: null,
       sendMessage: vi.fn((msg, callback) => {
-        // Capture the status AT THE POINT the message is sent (before callback).
         statusDuringMessage = store.pasteStatus;
         callback({ success: true, results: [] });
       }),
@@ -151,23 +120,6 @@ describe("_runPasteInitiative", () => {
     await _runPasteInitiative(store, chromeRuntime);
 
     expect(statusDuringMessage).toBe("pasting");
-  });
-
-  it("clears pasteResults to [] before the message resolves", async () => {
-    const store = makeMockStore({ pasteResults: [{ fieldId: "stale", status: "success" }] });
-    let resultsDuringMessage;
-
-    const chromeRuntime = {
-      lastError: null,
-      sendMessage: vi.fn((msg, callback) => {
-        resultsDuringMessage = [...store.pasteResults];
-        callback({ success: true, results: [] });
-      }),
-    };
-
-    await _runPasteInitiative(store, chromeRuntime);
-
-    expect(resultsDuringMessage).toEqual([]);
   });
 
   it("sets pasteStatus to 'done' after a successful response", async () => {
@@ -190,9 +142,14 @@ describe("_runPasteInitiative", () => {
     expect(store.pasteStatus).toBe("done");
   });
 
-  // ── Result population ────────────────────────────────────────────────────
+  // ── updateAfterPaste delegation ──────────────────────────────────────────
+  //
+  // Phase 11: _runPasteInitiative delegates result storage to
+  // state.updateAfterPaste() rather than directly mutating state.pasteResults.
+  // This keeps the function testable (only needs a mock with the method) and
+  // avoids duplicating the deriveFieldUIStates call site.  (design D-5)
 
-  it("populates pasteResults from response.results on success", async () => {
+  it("calls state.updateAfterPaste with response.results on success", async () => {
     const fieldResults = [
       { fieldId: "f1", label: "Title", status: "success" },
       { fieldId: "f2", label: "Owner", status: "skipped" },
@@ -204,22 +161,23 @@ describe("_runPasteInitiative", () => {
 
     await _runPasteInitiative(store, chromeRuntime);
 
-    expect(store.pasteResults).toEqual(fieldResults);
+    expect(store.updateAfterPaste).toHaveBeenCalledTimes(1);
+    expect(store.updateAfterPaste).toHaveBeenCalledWith(fieldResults);
   });
 
-  it("sets pasteResults to [] when response.results is absent (nullish coalescing)", async () => {
+  it("calls state.updateAfterPaste with [] when response.results is absent", async () => {
     const store = makeMockStore();
     // Service worker returned success:true but no results key (edge case).
     const chromeRuntime = makeMockChromeRuntime({ response: { success: true } });
 
     await _runPasteInitiative(store, chromeRuntime);
 
-    expect(store.pasteResults).toEqual([]);
+    expect(store.updateAfterPaste).toHaveBeenCalledWith([]);
   });
 
   // ── Error sentinel entry ─────────────────────────────────────────────────
 
-  it("sets a single error-sentinel result when response.success is false", async () => {
+  it("calls updateAfterPaste with a single error-sentinel when response.success is false", async () => {
     const store = makeMockStore();
     const chromeRuntime = makeMockChromeRuntime({
       response: { success: false, error: "Not on a PowerApps page." },
@@ -227,11 +185,12 @@ describe("_runPasteInitiative", () => {
 
     await _runPasteInitiative(store, chromeRuntime);
 
-    expect(store.pasteResults).toHaveLength(1);
-    const sentinel = store.pasteResults[0];
-    expect(sentinel.fieldId).toBe("__error__");
-    expect(sentinel.status).toBe("error");
-    expect(sentinel.message).toBe("Not on a PowerApps page.");
+    expect(store.updateAfterPaste).toHaveBeenCalledTimes(1);
+    const arg = store.updateAfterPaste.mock.calls[0][0];
+    expect(arg).toHaveLength(1);
+    expect(arg[0].fieldId).toBe("__error__");
+    expect(arg[0].status).toBe("error");
+    expect(arg[0].message).toBe("Not on a PowerApps page.");
   });
 
   it("error sentinel label is 'Error'", async () => {
@@ -242,10 +201,11 @@ describe("_runPasteInitiative", () => {
 
     await _runPasteInitiative(store, chromeRuntime);
 
-    expect(store.pasteResults[0].label).toBe("Error");
+    const arg = store.updateAfterPaste.mock.calls[0][0];
+    expect(arg[0].label).toBe("Error");
   });
 
-  it("handles chrome.runtime.lastError by setting an error sentinel", async () => {
+  it("calls updateAfterPaste with error-sentinel when chrome.runtime.lastError occurs", async () => {
     const store = makeMockStore();
     const chromeRuntime = {
       lastError: { message: "Could not establish connection." },
@@ -257,9 +217,10 @@ describe("_runPasteInitiative", () => {
     await _runPasteInitiative(store, chromeRuntime);
 
     expect(store.pasteStatus).toBe("done");
-    expect(store.pasteResults).toHaveLength(1);
-    expect(store.pasteResults[0].status).toBe("error");
-    expect(store.pasteResults[0].message).toBe("Could not establish connection.");
+    expect(store.updateAfterPaste).toHaveBeenCalledTimes(1);
+    const arg = store.updateAfterPaste.mock.calls[0][0];
+    expect(arg[0].status).toBe("error");
+    expect(arg[0].message).toBe("Could not establish connection.");
   });
 
   // ── Message sent correctly ───────────────────────────────────────────────

@@ -78,22 +78,29 @@
       -->
       <div class="context-banner" role="status" aria-live="polite" aria-atomic="true">
 
+        <!--
+          Phase 11 D-7: Dot is a CSS circle (no emoji content) — colour is set
+          per-banner in styles.css via .context-banner__row--ado .context-dot
+          etc.  Text shortened to the bare product name / state phrase so the
+          banner is compact and immediately scannable.  (spec: sidepanel-shell
+          §MODIFIED banner; design D-7)
+        -->
         <div class="context-banner__row context-banner__row--ado"
              x-show="$store.app.pageType === 'ado'">
-          <span class="context-dot" aria-hidden="true">🔵</span>
-          <span>Azure DevOps Initiative detected. Ready to copy.</span>
+          <span class="context-dot" aria-hidden="true"></span>
+          <span>Azure DevOps</span>
         </div>
 
         <div class="context-banner__row context-banner__row--pa"
              x-show="$store.app.pageType === 'pa'">
-          <span class="context-dot" aria-hidden="true">🟢</span>
-          <span>PowerApps form detected. Ready to paste.</span>
+          <span class="context-dot" aria-hidden="true"></span>
+          <span>PowerApps</span>
         </div>
 
         <div class="context-banner__row context-banner__row--unsupported"
              x-show="$store.app.pageType === 'unsupported'">
-          <span class="context-dot" aria-hidden="true">⚪</span>
-          <span>This page is not supported. Navigate to an ADO Initiative or a PowerApps form.</span>
+          <span class="context-dot" aria-hidden="true"></span>
+          <span>This page is not supported.</span>
         </div>
 
       </div><!-- /context-banner -->
@@ -145,8 +152,14 @@
           The button is disabled while copying (prevents duplicate requests)
           and when not on an ADO page (nothing to copy from).
         -->
+        <!--
+          Phase 11: Copy button uses ADO blue (#0078D4) via .btn--copy.
+          Distinct from .btn--primary (#2563eb used in Admin tab) so Admin
+          buttons are unaffected.  (spec: sidepanel-shell §ADDED button styling;
+          MT-35)
+        -->
         <button
-          class="btn btn--primary"
+          class="btn btn--copy"
           @click="$store.app.copyInitiative()"
           :disabled="$store.app.isCopyDisabled()"
         >Copy Initiative</button>
@@ -166,6 +179,22 @@
         ></div>
 
         <!--
+          Clear button — Phase 11 (§5.1; spec: user-tab-field-states §Clear button).
+
+          Clicking sends CLEAR_COPIED_DATA to the service worker, then resets
+          all field rows to NOT COPIED and disables both Clear and Paste.
+
+          isClearDisabled() delegates to computeIsClearDisabled(this.hasCopiedData)
+          in JS — the Alpine CSP build cannot evaluate the ! operator in a
+          :disabled binding.  (SPEC.md §3.2; design D-7)
+        -->
+        <button
+          class="btn btn--clear"
+          @click="$store.app.clearCopiedData()"
+          :disabled="$store.app.isClearDisabled()"
+        >Clear</button>
+
+        <!--
           Paste to PowerApps button — Phase 10 (§7.2, design D-8).
 
           @click calls pasteInitiative() which sets pasteStatus = "pasting",
@@ -180,8 +209,12 @@
             (b) no copied data available (nothing to paste)
           (design D-9; BR-004)
         -->
+        <!--
+          Phase 11: Paste button uses PA purple (#742774) via .btn--paste.
+          (spec: sidepanel-shell §ADDED button styling; task 7.3; MT-35)
+        -->
         <button
-          class="btn btn--primary"
+          class="btn btn--paste"
           @click="$store.app.pasteInitiative()"
           :disabled="$store.app.isPasteDisabled()"
         >Paste to PowerApps</button>
@@ -201,124 +234,91 @@
         ></div>
       </div>
 
-      <!-- Field Status List ───────────────────────────────────────────────── -->
+      <!-- Fields Section ──────────────────────────────────────────────────── -->
       <!--
-        Per-field results list — rendered after a copy operation completes.
+        Always-visible field list — Phase 11 (§7.2; spec: user-tab-field-states).
 
-        Visibility: shown only when hasCopyResults() returns true — a store
-        helper that checks `copyStatus === "done" && fieldResults.length > 0`.
-        The helper exists because Alpine CSP prohibits && in directives.
+        Every enabled mapping gets a row from the moment the side panel opens.
+        The row's state badge (NOT COPIED / COPIED / FAILED / PASTED / SKIPPED)
+        and secondary line are derived by deriveFieldUIStates(), which is called:
+          • on mount (init) — with data from session storage
+          • after Copy, Paste, or Clear
+          • after TAB_CHANGED — re-fetched from session storage
 
-        Each row shows the field label and a colour-coded status indicator:
-          .status-success → green  (field was read successfully)
-          .status-blank   → amber  (field was found but empty in ADO)
-          .status-error   → red    (selector failed or unexpected error)
+        Why x-show on the section label (not x-if)?
+          x-show keeps the section in the DOM so the field list persists when
+          the user briefly switches to the Admin tab and back — no re-render.
+          The "FIELDS" label is hidden when no mappings are configured yet
+          (fieldUIStates is empty), but the <ul> is always rendered so Alpine
+          can diff the list efficiently.
 
-        The :key on the x-for is result.fieldId.  In the error case
-        ($success: false), fieldResults contains a single entry with
-        fieldId "__error__", which is unique and safe as a key.
-
-        Why x-show on the list rather than x-if?
-          x-show keeps the list in the DOM so the results persist when the
-          user briefly switches to the Admin tab and back — no re-render on
-          return.  (design D-5 rationale for x-show)
+        All per-state rendering logic (icon, badge class, badge text, secondary
+        line) is delegated to store helper methods rather than inline directive
+        expressions.  The Alpine CSP build does not support multi-branch ternary
+        or template literals in directives.  (SPEC.md §3.2; design D-1)
       -->
-      <div class="field-results">
-        <ul
-          class="field-results-list"
-          x-show="$store.app.hasCopyResults()"
-          role="list"
+      <div class="field-section">
+
+        <!-- "FIELDS" heading — hidden when no mappings are configured yet -->
+        <p
+          class="field-section__label"
+          x-show="$store.app.fieldUIStates.length > 0"
           x-cloak
-        >
-          <template x-for="result in $store.app.fieldResults" :key="result.fieldId">
-            <li
-              class="field-result"
-              :class="{
-                'status-success': result.status === 'success',
-                'status-blank':   result.status === 'blank',
-                'status-error':   result.status === 'error'
-              }"
-            >
-              <!--
-                Status dot — colour comes from the parent .status-* class.
-                aria-hidden because the surrounding label + message text
-                already conveys the meaning to screen readers.
-              -->
-              <span class="field-result__dot" aria-hidden="true"></span>
+        >FIELDS</p>
 
-              <!-- Field label — sourced from mapping.label -->
-              <span class="field-result__label" x-text="result.label"></span>
+        <ul class="field-list" role="list">
+          <template x-for="state in $store.app.fieldUIStates" :key="state.fieldId">
+            <li class="field-row">
 
               <!--
-                Optional message — shown for blank and error results.
-                x-show="result.message" hides the element when message is
-                undefined (success results do not carry a message).
+                Icon span — Unicode glyph indicating the field state.
+                :aria-label via getFieldIconLabel() announces the state name
+                (e.g. "Copied", "Paste failed") to screen readers so the
+                visual icon is fully accessible.  (§11 Phase 11 accessibility note)
               -->
               <span
-                class="field-result__message"
-                x-show="result.message"
-                x-text="result.message"
+                class="field-row__icon"
+                :aria-label="$store.app.getFieldIconLabel(state)"
+                x-text="$store.app.getFieldIcon(state)"
               ></span>
+
+              <!-- Field label — sourced from mapping.label via FieldUIState.label -->
+              <span class="field-row__label" x-text="state.label"></span>
+
+              <!--
+                State badge — the entire class string (base + modifier) is
+                returned by getFieldBadgeClass(state) so the :class binding
+                is a single method call with no operator expressions.
+                The CSP build cannot safely evaluate complex :class objects
+                with multiple comparisons.  (SPEC.md §3.2; design D-1)
+              -->
+              <span
+                :class="$store.app.getFieldBadgeClass(state)"
+                x-text="$store.app.getFieldBadgeText(state)"
+              ></span>
+
+              <!--
+                Secondary line — shown for: copied (value), pasted (value),
+                copy_failed (error message), paste_failed (error message),
+                skipped (skip reason).  Hidden for not_copied.
+
+                showFieldSecondary(), getFieldSecondaryText(), and
+                getFieldSecondaryClass() encapsulate all per-state branching
+                so directive expressions stay as trivial method calls.
+                (spec §Field Row Structure; SPEC.md §3.2)
+              -->
+              <span
+                :class="$store.app.getFieldSecondaryClass(state)"
+                x-show="$store.app.showFieldSecondary(state)"
+                x-text="$store.app.getFieldSecondaryText(state)"
+                x-cloak
+              ></span>
+
             </li>
           </template>
         </ul>
 
-        <!--
-          Paste results list — rendered after a paste operation completes.
-
-          Visibility: shown only when hasPasteResults() returns true —
-          pasteStatus === "done" AND pasteResults.length > 0.
-
-          Status colour classes:
-            .status-success → green  (field was written successfully)
-            .status-skipped → grey   (field skipped — overwriteMode off + has value)
-            .status-warning → amber  (field found but no matching option/result)
-            .status-error   → red    (element not found or unexpected error)
-
-          Why x-show instead of x-if?
-            x-show keeps the list in the DOM so results persist when the user
-            briefly switches to the Admin tab and returns.  (design D-5)
-        -->
-        <ul
-          class="field-results-list"
-          x-show="$store.app.hasPasteResults()"
-          role="list"
-          x-cloak
-        >
-          <template x-for="result in $store.app.pasteResults" :key="result.fieldId">
-            <li
-              class="field-result"
-              :class="{
-                'status-success': result.status === 'success',
-                'status-skipped': result.status === 'skipped',
-                'status-warning': result.status === 'warning',
-                'status-error':   result.status === 'error'
-              }"
-            >
-              <!--
-                Status dot — colour comes from the parent .status-* class.
-                aria-hidden because the label + message conveys meaning to
-                screen readers.
-              -->
-              <span class="field-result__dot" aria-hidden="true"></span>
-
-              <!-- Field label — sourced from FieldResult.label -->
-              <span class="field-result__label" x-text="result.label"></span>
-
-              <!--
-                Optional message — shown for skipped, warning, and error results.
-                x-show="result.message" hides the element when message is
-                absent (success results typically have no message).
-              -->
-              <span
-                class="field-result__message"
-                x-show="result.message"
-                x-text="result.message"
-              ></span>
-            </li>
-          </template>
-        </ul>
-      </div>
+      </div><!-- /field-section -->
 
     </div><!-- /tab-user -->
 

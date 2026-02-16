@@ -370,24 +370,12 @@ if (typeof chrome !== "undefined") {
           // (FieldResult[]) lives in results[0].result. (design D-4)
           const fieldResults = injectionResults[0]?.result ?? [];
 
-          // Convert FieldResult[] → CopiedFieldData[].
-          // Only "success" and "blank" entries have copyable data.
-          // "error" entries are omitted from storage — they carry no value to paste.
-          // (design D-5; SPEC §6.2 step 7)
-          const copiedData = fieldResults
-            .filter(r => r.status === "success" || r.status === "blank")
-            .map(r => {
-              const entry = {
-                fieldId:    r.fieldId,
-                label:      r.label,
-                value:      r.status === "success" ? r.value : "",
-                readStatus: r.status,
-              };
-              // Include readMessage only for blank entries — the message explains
-              // why the value is empty without cluttering success entries.
-              if (r.status === "blank") entry.readMessage = r.message;
-              return entry;
-            });
+          // Convert FieldResult[] → CopiedFieldData[] — ALL entries, including errors.
+          // Phase 11 D-6: error entries must be stored (with value: "" and readMessage
+          // set) so the side panel can show FAILED badges after tab switches without
+          // re-running Copy.  Previously only "success" and "blank" were stored.
+          // (SPEC §6.2 step 5; spec: copy-initiative-flow §MODIFIED COPY_INITIATIVE)
+          const copiedData = convertFieldResultsToCopiedData(fieldResults);
 
           // First-ever write to chrome.storage.session in this extension.
           // Session storage is cleared when the browser closes — no migration needed.
@@ -699,7 +687,61 @@ if (typeof chrome !== "undefined") {
       return true; // keep channel open for the async storage read
     }
 
+    // ── CLEAR_COPIED_DATA ─────────────────────────────────────────────────────
+    // Async: wipe the session-storage copiedData entry.  Called by the Clear
+    // button in the User Tab.  Returns { success: true } on success or
+    // { success: false, error: message } on failure.
+    // (§5.1; spec: copy-initiative-flow §ADDED CLEAR_COPIED_DATA)
+    if (message.action === "CLEAR_COPIED_DATA") {
+      chrome.storage.session.set({ copiedData: null })
+        .then(() => {
+          sendResponse({ success: true });
+        })
+        .catch((err) => {
+          console.error("[SW] CLEAR_COPIED_DATA: storage write failed:", err);
+          sendResponse({ success: false, error: err.message });
+        });
+      return true; // keep channel open for the async storage write
+    }
+
     // Unknown messages are ignored — return undefined (Chrome treats as false).
+  });
+}
+
+// ─── COPY_INITIATIVE — Field Result Conversion ───────────────────────────────
+
+/**
+ * Convert a FieldResult[] (from adoReaderMain) into CopiedFieldData[].
+ *
+ * Phase 11 D-6: ALL entries are now included — including those with
+ * status "error" — so the side panel can show FAILED badges after tab
+ * switches without re-running Copy.  Previously only "success" and "blank"
+ * were stored.
+ *
+ * Extracted to module scope for Vitest unit testing (same pattern as
+ * handlePasteInitiative and detectPageType).
+ *
+ * @param {FieldResult[]} fieldResults - Results returned by adoReaderMain.
+ * @returns {CopiedFieldData[]}
+ */
+function convertFieldResultsToCopiedData(fieldResults) {
+  return fieldResults.map(r => {
+    // Every entry carries fieldId, label, readStatus, and value.
+    // value is the captured ADO text for "success" entries; "" for everything else.
+    const entry = {
+      fieldId:    r.fieldId,
+      label:      r.label,
+      value:      r.status === "success" ? r.value : "",
+      readStatus: r.status,
+    };
+    // readMessage carries the human-readable reason for blank and error entries:
+    //   - blank: the field was found in ADO but had no content
+    //   - error: the ADO selector failed or threw an unexpected error
+    // Success entries intentionally omit readMessage to keep storage lean.
+    if (r.status === "blank" || r.status === "error") {
+      entry.readMessage = r.message ?? "";
+    }
+    return entry;
   });
 }
 
@@ -801,5 +843,5 @@ async function handlePasteInitiative(deps) {
 // Allow unit tests (Vitest / Node.js) to import detectPageType without a Chrome
 // runtime. The guard ensures this line is a no-op when loaded by Chrome.
 if (typeof module !== "undefined") {
-  module.exports = { detectPageType, handlePasteInitiative };
+  module.exports = { detectPageType, handlePasteInitiative, convertFieldResultsToCopiedData };
 }

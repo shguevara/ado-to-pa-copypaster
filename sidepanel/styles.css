@@ -90,66 +90,149 @@ body {
   padding: 12px 14px;
 }
 
-/* ─── Page Context Banner ──────────────────────────────────────────────────── */
+/* ─── Page Context Banner (Phase 11 — brand colours) ───────────────────────── */
 /*
    Three rows — ADO, PA, unsupported — are always in the DOM; Alpine's x-show
    hides the two that don't match the current pageType.  Each row has a distinct
    background tint so the user can instantly identify the current context at a
    glance without reading the text.
 
+   Phase 11 D-7 changes:
+     • ADO row: Microsoft ADO blue (#1565C0 text, #90CAF9 border, #E3F2FD bg)
+     • PA row:  PowerApps purple (#7B1FA2 text, #CE93D8 border, #F3E5F5 bg)
+     • Unsupported: white background with grey border (#616161 text)
+     • Dot replaced by a CSS 10px circle; emoji content removed.
+
    role="status" + aria-live="polite" on the parent means screen readers
    announce a change whenever pageType updates (via TAB_CHANGED push).
+
+   Each row carries its own border so only one border is visible at a time
+   (matching whichever row x-show is making visible).  The container has no
+   border of its own — overflow:hidden + border-radius round the visible row.
 */
 
 .context-banner {
   margin-bottom: 14px;
-  border: 1px solid #e5e7eb;
   border-radius: 6px;
-  overflow: hidden;     /* clip the row backgrounds to the rounded border */
+  overflow: hidden;     /* clip each row's border-radius to the container */
 }
 
 .context-banner__row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.4;
+  /* transparent border by default — prevents layout shift when border appears */
+  border: 1px solid transparent;
+  border-radius: 6px;
 }
 
-/* ADO — light blue tint */
+/* ADO — Microsoft ADO blue */
 .context-banner__row--ado {
-  background: #eff6ff;
-  color: #1e40af;
+  background: #E3F2FD;
+  border-color: #90CAF9;
+  color: #1565C0;
 }
 
-/* PowerApps — light green tint */
+/* PowerApps — brand purple */
 .context-banner__row--pa {
-  background: #f0fdf4;
-  color: #166534;
+  background: #F3E5F5;
+  border-color: #CE93D8;
+  color: #7B1FA2;
 }
 
-/* Unsupported — neutral grey tint */
+/* Unsupported — white with neutral grey border */
 .context-banner__row--unsupported {
-  background: #f9fafb;
-  color: #6b7280;
+  background: #FFFFFF;
+  border-color: #E0E0E0;
+  color: #616161;
 }
 
+/* ── Context dot — CSS circle (Phase 11; replaces emoji) ──────────────────────
+   A 10px filled circle whose background-color is set per banner variant below.
+   aria-hidden="true" in HTML — the surrounding text label conveys the meaning
+   to screen readers.
+*/
 .context-dot {
-  font-size: 12px;
-  flex-shrink: 0;       /* icon never wraps or compresses */
-  line-height: 1.6;     /* vertically align with the first line of text */
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;       /* never wraps or compresses */
 }
 
-/* ─── Action Buttons  (Phase 7 / 10) ──────────────────────────────────────── */
+.context-banner__row--ado         .context-dot { background-color: #1565C0; }
+.context-banner__row--pa          .context-dot { background-color: #7B1FA2; }
+.context-banner__row--unsupported .context-dot { background-color: #9CA3AF; }
+
+/* ─── Action Buttons  (Phase 7 / 10 / 11) ─────────────────────────────────── */
 
 .action-buttons {
   display: flex;
-  flex-direction: row;   /* button and spinner side-by-side */
+  flex-direction: row;   /* buttons and spinners side-by-side */
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
   flex-wrap: wrap;       /* gracefully stacks on very narrow panels */
+}
+
+/* Phase 11: All action buttons in the User Tab are taller (48px) with a
+   smaller font (12px) so they read well at the compact panel width.
+   (spec: sidepanel-shell §ADDED button styling; MT-35) */
+.action-buttons .btn {
+  height: 48px;
+  font-size: 12px;
+}
+
+/* Copy Initiative — ADO blue (#0078D4).
+   Uses .btn--copy rather than overriding .btn--primary so Admin tab Save /
+   "+ Add Mapping" buttons (#2563eb) are not affected.  (task 7.3; MT-35) */
+.btn--copy {
+  background: #0078D4;
+  border-color: #0078D4;
+  color: #ffffff;
+}
+
+.btn--copy:hover:not(:disabled) {
+  background: #006CBE;
+  border-color: #006CBE;
+}
+
+/* Paste to PowerApps — PA purple (#742774).  (task 7.3; MT-35) */
+.btn--paste {
+  background: #742774;
+  border-color: #742774;
+  color: #ffffff;
+}
+
+.btn--paste:hover:not(:disabled) {
+  background: #5D1C5D;
+  border-color: #5D1C5D;
+}
+
+/* Clear — neutral grey.  Resets field rows to NOT COPIED.  (task 7.3; MT-35) */
+.btn--clear {
+  background: #F3F4F6;
+  border-color: #D1D5DB;
+  color: #374151;
+}
+
+.btn--clear:hover:not(:disabled) {
+  background: #E5E7EB;
+  border-color: #9CA3AF;
+}
+
+/* Disabled state for all User Tab action buttons — #CCCCCC fill + #888888 text.
+   opacity: 1 overrides the generic .btn:disabled opacity: 0.45 so the
+   explicit colour values are what the user sees.  (task 7.3; MT-35) */
+.action-buttons .btn:disabled {
+  background: #CCCCCC;
+  border-color: #CCCCCC;
+  color: #888888;
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 /* ── Spinner ────────────────────────────────────────────────────────────────
@@ -172,107 +255,159 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* ─── Field Status List  (Phase 7 / 10) ───────────────────────────────────── */
+/* ─── Field Section  (Phase 11 — always-visible field list) ────────────────── */
+/*
+   Replaces the old per-operation .field-results lists (Phase 7/10).
+   Every enabled mapping is always visible — the state badge and secondary
+   line reflect the most recent operation (copy / paste / clear).
 
-.field-results {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+   Layout per row:
+     [icon 24px] [label flex:1] ··· [badge right-aligned]
+                 [secondary line — full width, indented to label]
+
+   The secondary line uses flex-wrap: wrap so it drops onto its own line
+   while the icon+label+badge stay on the first line.  (§7.2 Field Row
+   Structure; spec: user-tab-field-states)
+*/
+
+.field-section {
+  margin-top: 4px;
 }
 
-/* Unordered list that wraps all per-field result rows */
-.field-results-list {
+/* "FIELDS" heading — 11px uppercase label shown when at least one mapping
+   is configured.  Matches the "── Field Mappings ──" label weight.  */
+.field-section__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 2px 6px;
+  margin: 0;
+}
+
+.field-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
-/* ── Individual result row ──────────────────────────────────────────────────
-   Each row shows: coloured dot | field label | optional message.
-   The left border stripe reinforces the status colour at a glance
-   (consistent with the context-banner__row pattern above).
-*/
-.field-result {
+/* Individual field row — flex wrap so secondary line drops below */
+.field-row {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 40px;
   padding: 6px 10px;
-  border-radius: 4px;
-  border: 1px solid transparent;
-  font-size: 13px;
-  line-height: 1.4;
+  gap: 0 6px;             /* column gap between inline items; no row gap */
+  border-bottom: 1px solid #F3F4F6;
 }
 
-/* Status dot — a small filled circle coloured by the parent's .status-* class */
-.field-result__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+/* Icon glyph — fixed 24px width so label and badge align regardless of glyph */
+.field-row__icon {
+  width: 24px;
   flex-shrink: 0;
-  margin-top: 3px;   /* align vertically with the first line of text */
-  background: currentColor;  /* inherits the text colour set by .status-* */
+  font-size: 13px;
+  text-align: center;
 }
 
-/* Field label — primary text, slightly bolder */
-.field-result__label {
+/* Label — grows to fill remaining space on the first line */
+.field-row__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
   font-weight: 500;
-  color: inherit;
+  color: #1F2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Optional message — muted secondary text (shown for blank / error results) */
-.field-result__message {
+/* Badge — pushed to the far right via margin-left: auto
+   Class string is returned wholesale by getFieldBadgeClass() in JS so the
+   Alpine :class binding is a single method call.  (SPEC.md §3.2; design D-1) */
+.field-row__badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Secondary line — breaks to full width below icon+label+badge.
+   padding-left aligns the text under the label (icon width + column gap). */
+.field-row__secondary {
+  width: 100%;
+  padding-left: 30px;   /* icon (24px) + gap (6px) */
   font-size: 12px;
-  opacity: 0.8;
-  color: inherit;
+  line-height: 1.3;
 }
 
-/* ── Status colour variants ─────────────────────────────────────────────────
-   Three statuses adoReaderMain can produce:
-     success — field was read and has a value       → green
-     blank   — field was found but empty in ADO     → amber/yellow
-     error   — selector failed or unexpected error  → red
-
-   Colour tokens deliberately match the import-message variants already in
-   this file (success/error) and the context-banner tokens (ADO/PA tints),
-   so the visual vocabulary stays consistent across the panel.
+/* ── Badge state variants ────────────────────────────────────────────────────
+   Colours from SPEC.md §7.2 Field State Reference / task 7.5.
+   Each class is applied wholesale by getFieldBadgeClass() — they include
+   the .field-row__badge base class so no separate <span class="field-row__badge">
+   is needed in the HTML.
 */
 
-/* success — green, matching import-message--success and context-banner--pa */
-.status-success {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
-  color: #166534;
+/* NOT COPIED — muted grey text, no background fill */
+.badge--not-copied {
+  color: #9CA3AF;
+  background: transparent;
 }
 
-/* blank — amber/yellow — field exists but was empty; softer than error */
-.status-blank {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #92400e;
+/* COPIED — green on pale green */
+.badge--copied {
+  color: #16A34A;
+  background: #DCFCE7;
 }
 
-/* error — red, matching import-message--error and .btn--danger */
-.status-error {
-  background: #fef2f2;
-  border-color: #fca5a5;
-  color: #dc2626;
+/* FAILED (copy) — white on red */
+.badge--copy-failed {
+  color: #FFFFFF;
+  background: #DC2626;
 }
 
-/* skipped — neutral blue-grey — field was skipped (overwriteMode off + has value) */
-.status-skipped {
-  background: #f0f4f8;
-  border-color: #cbd5e1;
-  color: #475569;
+/* PASTED — white on green */
+.badge--pasted {
+  color: #FFFFFF;
+  background: #16A34A;
 }
 
-/* warning — amber/yellow — field found but no exact option/lookup match */
-.status-warning {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #92400e;
+/* FAILED (paste) — white on red */
+.badge--paste-failed {
+  color: #FFFFFF;
+  background: #DC2626;
+}
+
+/* SKIPPED — amber on pale yellow */
+.badge--skipped {
+  color: #D97706;
+  background: #FEF3C7;
+}
+
+/* ── Secondary line state modifiers ─────────────────────────────────────────
+   Class string is returned wholesale by getFieldSecondaryClass() in JS.
+*/
+
+/* Copied/pasted value — muted grey; content is just the data value */
+.field-row__secondary--value {
+  color: #6B7280;
+}
+
+/* Error message (copy_failed / paste_failed) — red, smaller */
+.field-row__secondary--failed {
+  color: #DC2626;
+  font-size: 11px;
+}
+
+/* Skip reason — amber, smaller */
+.field-row__secondary--skipped {
+  color: #D97706;
+  font-size: 11px;
 }
 
 /* ─── Phase 10 — Overwrite Mode badge ──────────────────────────────────────── */

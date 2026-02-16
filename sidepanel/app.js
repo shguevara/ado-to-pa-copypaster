@@ -1,5 +1,5 @@
 /**
- * Side Panel Application — Phase 6: Export / Import
+ * Side Panel Application — Phase 11: User Tab UI Overhaul
  *
  * Script loading contract (enforced in index.html):
  *   <script src="app.js">                      ← synchronous, runs immediately
@@ -14,19 +14,125 @@
  *   registered — every Alpine binding would silently reference undefined.
  *
  * Node.js / Vitest compatibility:
- *   validateImportData is a module-scope pure function exported via a
- *   conditional `module.exports` guard at the bottom (same pattern as
- *   detectPageType in service-worker.js).  Chrome and DOM API calls are
- *   wrapped in `typeof` guards so the file can be imported in Node.js
- *   without any mocks.
+ *   Pure functions at module scope are exported via a conditional
+ *   `module.exports` guard at the bottom (same pattern as detectPageType in
+ *   service-worker.js).  Chrome and DOM API calls are wrapped in `typeof`
+ *   guards so the file can be imported in Node.js without any mocks.
  */
 
-// ─── Paste state — module-scope pure functions ────────────────────────────────
+// ─── Field State Derivation — module-scope pure functions ─────────────────────
 //
 // These functions are extracted to module scope (outside the Alpine store) so
 // Vitest can import and test them in Node.js without needing a browser or Alpine.
 // The store methods delegate to them, keeping the directive expressions trivial.
-// (Same testability pattern as validateImportData below.)
+// (design D-1; same testability pattern as validateImportData below.)
+
+/**
+ * Derive a FieldUIState[] array from the current app state.
+ *
+ * Returns one FieldUIState per enabled mapping, in mapping order.
+ *
+ * Derivation logic (SPEC.md §7.2 / spec: user-tab-field-states):
+ *   For each mapping m:
+ *     1. Find copiedItem  = copiedData?.find(d => d.fieldId === m.id) ?? null
+ *     2. Find pasteResult = lastPasteResults?.find(r => r.fieldId === m.id) ?? null
+ *     3. If lastOperation === "paste" AND pasteResult is not null:
+ *          "success"          → state "pasted",      copiedValue from copiedItem
+ *          "error"|"warning"  → state "paste_failed", message from pasteResult
+ *          "skipped"|"blank"  → state "skipped",      message from pasteResult
+ *     4. Else if copiedItem is not null:
+ *          readStatus "success" → state "copied",      copiedValue from copiedItem.value
+ *          readStatus "blank"   → state "copied",      copiedValue ""
+ *          readStatus "error"   → state "copy_failed", message from copiedItem.readMessage
+ *     5. Otherwise: state "not_copied"
+ *
+ * Why pure rather than a computed Alpine property?
+ *   The derivation has 6 branching states × multiple null guards — too complex
+ *   to express safely in an Alpine directive expression, especially under the
+ *   CSP constraint.  A pure function is independently unit-testable, and the
+ *   Alpine store delegates to it via a method call.  (design D-1)
+ *
+ * @param {object[]} enabledMappings    - Enabled FieldMapping[] from settings.
+ * @param {object[]|null} copiedData    - CopiedFieldData[] from session storage, or null.
+ * @param {object[]|null} lastPasteResults - FieldResult[] from last Paste, or null.
+ * @param {string|null}   lastOperation    - "copy" | "paste" | null.
+ * @returns {object[]} FieldUIState[]
+ */
+function deriveFieldUIStates(enabledMappings, copiedData, lastPasteResults, lastOperation) {
+  return enabledMappings.map(function(m) {
+    // Look up this mapping's entries in both the copy and paste result sets.
+    var copiedItem   = (copiedData        || []).find(function(d) { return d.fieldId === m.id; }) || null;
+    var pasteResult  = (lastPasteResults  || []).find(function(r) { return r.fieldId === m.id; }) || null;
+
+    // Paste results take priority when the last user action was "paste".
+    // If no paste result exists for this mapping, fall through to copy state.
+    if (lastOperation === "paste" && pasteResult !== null) {
+      var ps = pasteResult.status;
+      var copiedValue = copiedItem ? copiedItem.value : null;
+
+      if (ps === "success") {
+        return { fieldId: m.id, label: m.label, state: "pasted",       copiedValue: copiedValue,        message: null };
+      }
+      if (ps === "error" || ps === "warning") {
+        return { fieldId: m.id, label: m.label, state: "paste_failed", copiedValue: copiedValue,        message: pasteResult.message || null };
+      }
+      // "skipped" or "blank"
+      return   { fieldId: m.id, label: m.label, state: "skipped",      copiedValue: copiedValue,        message: pasteResult.message || null };
+    }
+
+    // Copy state: derive from the persisted copiedData entry.
+    if (copiedItem !== null) {
+      if (copiedItem.readStatus === "success") {
+        return { fieldId: m.id, label: m.label, state: "copied",      copiedValue: copiedItem.value,   message: null };
+      }
+      if (copiedItem.readStatus === "blank") {
+        return { fieldId: m.id, label: m.label, state: "copied",      copiedValue: "",                 message: null };
+      }
+      // readStatus "error"
+      return   { fieldId: m.id, label: m.label, state: "copy_failed", copiedValue: null,               message: copiedItem.readMessage || null };
+    }
+
+    // No copy data and no paste result for this mapping → not yet copied.
+    return { fieldId: m.id, label: m.label, state: "not_copied", copiedValue: null, message: null };
+  });
+}
+
+/**
+ * Returns true when `copiedData` contains at least one non-error entry.
+ *
+ * Why "non-error" rather than "any entry"?
+ *   Phase 11 persists ALL copy outcomes including errors.  An all-error array
+ *   means every ADO selector failed — there is nothing meaningful to paste.
+ *   At least one "success" or "blank" entry means real data was captured and
+ *   the Paste / Clear actions should be enabled.  (design D-3 risk)
+ *
+ * @param {object[]|null} copiedData - CopiedFieldData[] or null.
+ * @returns {boolean}
+ */
+function computeHasCopiedData(copiedData) {
+  if (!copiedData || copiedData.length === 0) return false;
+  return copiedData.some(function(d) { return d.readStatus !== "error"; });
+}
+
+/**
+ * Returns true when the Clear button should be disabled.
+ *
+ * The Clear button is only meaningful when there is data to clear.
+ *
+ * Why a pure function rather than inline Alpine `!hasCopiedData`?
+ *   The Alpine CSP expression parser does not support the `!` unary operator
+ *   on property-chain expressions in directive attributes.  Wrapping in a
+ *   store method (which calls this) keeps the directive trivially parseable.
+ *   (SPEC.md §3.2 CSP constraint; design D-1)
+ *
+ * @param {boolean} hasCopiedData
+ * @returns {boolean}
+ */
+function computeIsClearDisabled(hasCopiedData) {
+  return !hasCopiedData;
+}
+
+// ─── Paste state — module-scope pure functions ────────────────────────────────
 
 /**
  * Returns true when the "Paste to PowerApps" button should be disabled.
@@ -49,42 +155,32 @@ function computeIsPasteDisabled(pageType, hasCopiedData) {
 }
 
 /**
- * Returns true when the paste result list should be visible.
- *
- * Both conditions must be true:
- *   (a) pasteStatus === "done"    — a paste operation has completed
- *   (b) pasteResults.length > 0  — there is at least one result to show
- *
- * @param {string} pasteStatus   - The current paste status from the store.
- * @param {Array}  pasteResults  - The current pasteResults array from the store.
- * @returns {boolean}
- */
-function computeHasPasteResults(pasteStatus, pasteResults) {
-  return pasteStatus === "done" && pasteResults.length > 0;
-}
-
-/**
  * Core async action for "Paste to PowerApps".
  *
  * Extracted from the Alpine store so it can be unit-tested by passing in a
  * mock chrome.runtime object.  The store method `pasteInitiative()` delegates
  * to this function.
  *
+ * Phase 11 update: state changes after the response are now handled by
+ * state.updateAfterPaste(results) rather than direct `state.pasteResults`
+ * mutations.  This keeps the mock surface minimal (only pasteStatus +
+ * updateAfterPaste() needed) and avoids duplicating the deriveFieldUIStates
+ * call site.  (design D-5; task 1.4)
+ *
  * State transitions:
- *   1. Before message: pasteStatus = "pasting", pasteResults = []
- *   2. On success:     pasteStatus = "done",    pasteResults = response.results
- *   3. On failure:     pasteStatus = "done",    pasteResults = [error sentinel]
+ *   1. Before message: pasteStatus = "pasting"
+ *   2. On success:     pasteStatus = "done", state.updateAfterPaste(results)
+ *   3. On failure:     pasteStatus = "done", state.updateAfterPaste([error sentinel])
  *
  * @param {object} state          - The Alpine store (or mock store) with
- *                                  pasteStatus and pasteResults properties.
+ *                                  pasteStatus and updateAfterPaste().
  * @param {object} chromeRuntime  - chrome.runtime (or mock) with sendMessage
  *                                  and lastError.
  * @returns {Promise<void>}
  */
 async function _runPasteInitiative(state, chromeRuntime) {
-  // Step 1: set spinner state and clear stale results before messaging.
-  state.pasteStatus  = "pasting";
-  state.pasteResults = [];
+  // Step 1: set spinner state before messaging.
+  state.pasteStatus = "pasting";
 
   let response = null;
   await new Promise((resolve) => {
@@ -103,19 +199,19 @@ async function _runPasteInitiative(state, chromeRuntime) {
     });
   });
 
-  // Step 2/3: update store based on the response.
+  // Step 2/3: delegate state update to the store method, then close spinner.
   if (response && response.success) {
-    state.pasteResults = response.results ?? [];
-    state.pasteStatus  = "done";
+    state.updateAfterPaste(response.results ?? []);
+    state.pasteStatus = "done";
   } else {
-    // Surface the error as a single sentinel entry in the results list.
-    // This matches the pattern used by copyInitiative() for error cases.
-    state.pasteResults = [{
+    // Surface the error as a single sentinel entry so the field list shows
+    // an error state.  This matches the pattern used by copyInitiative().
+    state.updateAfterPaste([{
       fieldId: "__error__",
       label:   "Error",
       status:  "error",
       message: response?.error ?? "Unknown error",
-    }];
+    }]);
     state.pasteStatus = "done";
   }
 }
@@ -199,6 +295,21 @@ if (typeof chrome !== "undefined") {
 
     if (message.action === "TAB_CHANGED") {
       store.pageType = message.pageType;
+
+      // Phase 11 D-3: After a tab switch, re-fetch copiedData and re-derive
+      // fieldUIStates.  This ensures copy states (from session storage) survive
+      // tab switches.  Paste states also survive because lastPasteResults is
+      // in-memory within the same panel session.
+      chrome.runtime.sendMessage({ action: "GET_COPIED_DATA" }, function(response) {
+        if (chrome.runtime.lastError) return;
+        var copiedData = response && response.data ? response.data : null;
+        store.fieldUIStates = deriveFieldUIStates(
+          store.enabledMappings,
+          copiedData,
+          store.lastPasteResults,
+          store.lastOperation
+        );
+      });
       return;
     }
 
@@ -620,12 +731,20 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     pageType: "unsupported",    // "ado" | "pa" | "unsupported"
 
     // ── User tab state ────────────────────────────────────────────────────
-    copyStatus:   "idle",       // "idle" | "copying" | "done"
-    pasteStatus:  "idle",       // "idle" | "pasting" | "done"
+    copyStatus:    "idle",       // "idle" | "copying" | "done"
+    pasteStatus:   "idle",       // "idle" | "pasting" | "done"
     hasCopiedData: false,
-    lastOperation: null,        // "copy" | "paste" | null
-    fieldResults:  [],          // FieldResult[] — rendered after Copy
-    pasteResults:  [],          // FieldResult[] — rendered after Paste
+    lastOperation: null,         // "copy" | "paste" | null
+
+    // Phase 11: always-visible field state model — replaces the old
+    // `fieldResults[]` / `pasteResults[]` temporal slices.
+    // enabledMappings: populated from settings.mappings.filter(m => m.enabled)
+    //   on init and re-derived on every settings change.
+    // fieldUIStates: derived from enabledMappings + copiedData + lastPasteResults.
+    // lastPasteResults: in-memory only (not persisted); null before any paste.
+    enabledMappings: [],         // FieldMapping[] — enabled subset of settings.mappings
+    fieldUIStates:   [],         // FieldUIState[] — one per enabled mapping
+    lastPasteResults: null,      // FieldResult[] | null — from last PASTE_INITIATIVE
 
     // ── Admin tab state ───────────────────────────────────────────────────
     settings:           null,   // AppSettings — loaded from storage on init (below)
@@ -753,9 +872,6 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     saveMapping(formData) {
       // Safety guard — should never be reached because adminMappingForm.save()
       // validates first, but defensive programming prevents silent data corruption.
-      // All four required fields (SPEC.md §4.1) are checked here so that any
-      // future caller (test harness, Phase 10 script, etc.) cannot persist an
-      // incomplete or invalid mapping. (design D-5)
       if (
         !formData.label?.trim()           ||
         !formData.fieldSchemaName?.trim() ||
@@ -782,29 +898,23 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       }
 
       this.settings = { ...this.settings, mappings };
+      this.updateEnabledMappings();
       this._saveSettings();
       this.closeForm();
     },
 
     // Remove a mapping after the user confirms the destructive action.
-    //
-    // Why window.confirm rather than an inline confirmation widget?
-    //   Simple and synchronous. Acceptable for an internal tool used by a
-    //   small team. A richer inline confirmation is deferred to a later phase.
     deleteMapping(id) {
       if (!window.confirm("Delete this mapping? This cannot be undone.")) return;
 
       const mappings = (this.settings?.mappings ?? []).filter((m) => m.id !== id);
       this.settings = { ...this.settings, mappings };
 
-      // If the form is open for the mapping that was just deleted, close it.
-      // Without this guard, showMappingForm stays true and editingMapping holds
-      // a stale shallow copy of the deleted entry — the user would see an open
-      // form for a ghost mapping. (COMMENTS.md §Should Fix)
       if (this.editingMapping?.id === id) {
         this.closeForm();
       }
 
+      this.updateEnabledMappings();
       this._saveSettings();
     },
 
@@ -814,37 +924,235 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
         m.id === id ? { ...m, enabled: !m.enabled } : m
       );
       this.settings = { ...this.settings, mappings };
+      this.updateEnabledMappings();
       this._saveSettings();
     },
 
     // Update the overwrite mode preference and persist immediately.
     setOverwriteMode(value) {
       this.settings = { ...this.settings, overwriteMode: value };
+      this.updateEnabledMappings();
       this._saveSettings();
+    },
+
+    // ── Phase 11 — enabledMappings derived state ───────────────────────────
+    //
+    // updateEnabledMappings() re-derives the enabledMappings array from
+    // settings.mappings whenever settings change.  It is called at the end of
+    // every method that modifies this.settings.  (§7.2 Fields Section)
+    //
+    // Why not a computed Alpine property?
+    //   Alpine.store() does not support reactive computed properties — only
+    //   plain properties and methods.  We re-derive imperatively after each
+    //   mutation, which gives identical semantics.
+    updateEnabledMappings() {
+      this.enabledMappings = (this.settings?.mappings ?? []).filter(function(m) {
+        return m.enabled;
+      });
+    },
+
+    // ── Phase 11 — post-copy state update ────────────────────────────────
+    //
+    // Called from copyInitiative() after a successful COPY_INITIATIVE response.
+    // Converts the FieldResult[] to CopiedFieldData[] (for hasCopiedData),
+    // sets hasCopiedData, records lastOperation, and re-derives fieldUIStates.
+    // (design D-5; §7.4)
+    updateAfterCopy(fieldResults) {
+      // Build a CopiedFieldData-compatible array from the raw FieldResult[].
+      // We only need readStatus for the hasCopiedData computation; the full
+      // CopiedFieldData with value/readMessage lives in session storage and is
+      // loaded from there when deriving field states.
+      var copiedData = fieldResults.map(function(r) {
+        return { fieldId: r.fieldId, label: r.label, value: r.value || "", readStatus: r.status };
+      });
+      this.hasCopiedData  = computeHasCopiedData(copiedData);
+      this.lastOperation  = "copy";
+      this.fieldUIStates  = deriveFieldUIStates(this.enabledMappings, copiedData, null, "copy");
+    },
+
+    // ── Phase 11 — post-paste state update ───────────────────────────────
+    //
+    // Called from _runPasteInitiative() after a PASTE_INITIATIVE response.
+    // Stores the paste results in-memory, records lastOperation, and re-derives
+    // fieldUIStates using the in-memory lastPasteResults.  (design D-5)
+    //
+    // Why not re-fetch copiedData from session storage here?
+    //   The paste results are received immediately after the paste completes.
+    //   At that point hasCopiedData is already true (set during updateAfterCopy)
+    //   and copiedData is in fieldUIStates from the copy step.  We re-read
+    //   copiedData from the fieldUIStates by looking at what we stored after Copy
+    //   (in session via SW) — but for simplicity we derive from the existing
+    //   copiedData in store.  Actually, to stay in sync with session storage,
+    //   we use a GET_COPIED_DATA call... but updateAfterPaste is synchronous.
+    //   Solution: read copiedData from the current fieldUIStates' copiedValues.
+    //   However, the cleanest solution is to pass the current copiedData directly.
+    //
+    // Note: we derive copiedData from fieldUIStates to avoid an async round-trip
+    // here.  fieldUIStates already has the copiedValues from the copy step.
+    updateAfterPaste(pasteResults) {
+      this.lastPasteResults = pasteResults;
+      this.lastOperation    = "paste";
+      // Re-construct a minimal copiedData from fieldUIStates to pass to
+      // deriveFieldUIStates.  We need this because pasteResult entries don't
+      // carry the original copiedValue — it must come from the copy step.
+      var copiedData = this.fieldUIStates
+        .filter(function(s) { return s.state !== "not_copied"; })
+        .map(function(s) {
+          return {
+            fieldId:    s.fieldId,
+            value:      s.copiedValue !== null ? s.copiedValue : "",
+            readStatus: (s.state === "copy_failed") ? "error" : "success",
+            readMessage: s.message,
+          };
+        });
+      // Include not_copied states as absent (copiedData won't have entries for them).
+      if (!computeHasCopiedData(copiedData)) copiedData = null;
+      this.fieldUIStates = deriveFieldUIStates(
+        this.enabledMappings,
+        copiedData,
+        pasteResults,
+        "paste"
+      );
+    },
+
+    // ── Phase 11 — clear session data ────────────────────────────────────
+    //
+    // Sends CLEAR_COPIED_DATA to the service worker, then resets hasCopiedData,
+    // lastOperation, lastPasteResults, and fieldUIStates.  (§5.1; spec Clear button)
+    clearCopiedData() {
+      chrome.runtime.sendMessage({ action: "CLEAR_COPIED_DATA" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error("[app] CLEAR_COPIED_DATA: runtime error:", chrome.runtime.lastError.message);
+          return;
+        }
+        if (response && response.success) {
+          this.hasCopiedData    = false;
+          this.lastOperation    = null;
+          this.lastPasteResults = null;
+          this.fieldUIStates    = deriveFieldUIStates(this.enabledMappings, null, null, null);
+        } else {
+          console.error("[app] CLEAR_COPIED_DATA: service worker reported failure:", response && response.error);
+        }
+      });
+    },
+
+    // ── Phase 11 — isClearDisabled helper ─────────────────────────────────
+    //
+    // Delegates to computeIsClearDisabled so the Alpine CSP expression parser
+    // never has to evaluate the `!` operator on a property chain in a directive.
+    // (SPEC.md §3.2 CSP constraint; design D-1)
+    isClearDisabled() {
+      return computeIsClearDisabled(this.hasCopiedData);
+    },
+
+    // ── Phase 11 — field row rendering helpers ────────────────────────────
+    //
+    // ALL helper methods below exist because the Alpine CSP expression parser
+    // prohibits multi-branch logic (switch, ternary, string concatenation,
+    // logical operators) in directive attribute values.  The HTML bindings stay
+    // as trivial method calls; all state-to-string mapping lives here in JS.
+    // (SPEC.md §3.2 CSP constraint; task 6.4)
+
+    // Returns the Unicode icon character for a given FieldUIState.
+    getFieldIcon(state) {
+      if (state.state === "not_copied")  return "\u25CB";   // ○
+      if (state.state === "copied")      return "\u25CF";   // ●
+      if (state.state === "copy_failed") return "\u2715";   // ✕
+      if (state.state === "pasted")      return "\u2713";   // ✓
+      if (state.state === "paste_failed")return "\u2715";   // ✕
+      if (state.state === "skipped")     return "\u2298";   // ⊘
+      return "\u25CB";
+    },
+
+    // Returns the aria-label for the icon span, for screen reader accessibility.
+    getFieldIconLabel(state) {
+      if (state.state === "not_copied")   return "Not copied";
+      if (state.state === "copied")       return "Copied";
+      if (state.state === "copy_failed")  return "Copy failed";
+      if (state.state === "pasted")       return "Pasted";
+      if (state.state === "paste_failed") return "Paste failed";
+      if (state.state === "skipped")      return "Skipped";
+      return "Unknown";
+    },
+
+    // Returns the uppercase badge text for a given FieldUIState.
+    getFieldBadgeText(state) {
+      if (state.state === "not_copied")   return "NOT COPIED";
+      if (state.state === "copied")       return "COPIED";
+      if (state.state === "copy_failed")  return "FAILED";
+      if (state.state === "pasted")       return "PASTED";
+      if (state.state === "paste_failed") return "FAILED";
+      if (state.state === "skipped")      return "SKIPPED";
+      return "";
+    },
+
+    // Returns the CSS class string for the badge element.
+    getFieldBadgeClass(state) {
+      if (state.state === "not_copied")   return "field-row__badge badge--not-copied";
+      if (state.state === "copied")       return "field-row__badge badge--copied";
+      if (state.state === "copy_failed")  return "field-row__badge badge--copy-failed";
+      if (state.state === "pasted")       return "field-row__badge badge--pasted";
+      if (state.state === "paste_failed") return "field-row__badge badge--paste-failed";
+      if (state.state === "skipped")      return "field-row__badge badge--skipped";
+      return "field-row__badge badge--not-copied";
+    },
+
+    // Returns the secondary-line text (value or error message) for a field row.
+    // Returns "" when nothing should be shown.
+    getFieldSecondaryText(state) {
+      if (state.state === "copy_failed" || state.state === "paste_failed") {
+        return state.message || "";
+      }
+      if (state.state === "skipped") {
+        return state.message || "";
+      }
+      if (state.state === "copied" || state.state === "pasted") {
+        return state.copiedValue !== null ? state.copiedValue : "";
+      }
+      return "";
+    },
+
+    // Returns the CSS class for the secondary-line span.
+    getFieldSecondaryClass(state) {
+      if (state.state === "copy_failed" || state.state === "paste_failed") {
+        return "field-row__secondary field-row__secondary--failed";
+      }
+      if (state.state === "skipped") {
+        return "field-row__secondary field-row__secondary--skipped";
+      }
+      return "field-row__secondary field-row__secondary--value";
+    },
+
+    // Returns true when the secondary line should be visible for a field row.
+    // Visible when: copied/pasted with a non-null copiedValue, OR failed/skipped.
+    showFieldSecondary(state) {
+      if (state.state === "copy_failed" || state.state === "paste_failed") {
+        return !!(state.message);
+      }
+      if (state.state === "skipped") {
+        return !!(state.message);
+      }
+      if (state.state === "copied" || state.state === "pasted") {
+        return state.copiedValue !== null && state.copiedValue !== "";
+      }
+      return false;
     },
 
     // ── Copy Initiative ───────────────────────────────────────────────────
     //
     // Sends COPY_INITIATIVE to the service worker, which injects ado-reader.js
-    // into the active ADO tab and returns per-field results.  The store
-    // properties copyStatus / hasCopiedData / fieldResults are already declared
-    // in the store shape from Phase 3 — this method wires them to the message.
+    // into the active ADO tab and returns per-field results.
     //
-    // Why the same Promise-wrapping pattern as importMappings()?
-    //   chrome.runtime.sendMessage's callback API is not natively awaitable.
-    //   Wrapping in `new Promise(resolve => ...)` with a closure flag lets us
-    //   use async/await for linear control flow and consolidate error handling
-    //   in one place.  (design D-6; same idiom as importMappings SAVE_SETTINGS)
+    // Phase 11 update: result handling is delegated to updateAfterCopy()
+    // instead of directly mutating fieldResults / hasCopiedData.  (design D-5)
     async copyInitiative() {
-      this.copyStatus   = "copying";
+      this.copyStatus    = "copying";
       this.lastOperation = "copy";
-      this.fieldResults  = [];
 
       let response = null;
       await new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: "COPY_INITIATIVE" }, (res) => {
           if (chrome.runtime.lastError) {
-            // Service worker unavailable or channel closed unexpectedly.
             response = {
               success: false,
               error:   chrome.runtime.lastError.message,
@@ -858,27 +1166,17 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       });
 
       if (response?.success) {
-        // Successful copy — store all field results (success + blank + error)
-        // so the user can see exactly which fields were read and their status.
-        this.fieldResults  = response.results ?? [];
-        // hasCopiedData is true only when at least one result is not an error.
-        // "blank" results still have copyable data (an empty value for the PA
-        // field), so they count as valid paste targets. Pure all-error results
-        // (e.g. every selector failed) mean there is nothing meaningful to paste.
-        // (design D-7; COMMENTS.md 🟡 item 1)
-        this.hasCopiedData = (response.results ?? []).some(r => r.status !== "error");
-        this.copyStatus    = "done";
-      } else {
-        // Copy failed (not on ADO page, injection error, etc.) — surface as a
-        // single status:error row in the results list.  hasCopiedData stays
-        // false because there is nothing valid to paste.  (design D-6)
-        this.fieldResults = [{
-          fieldId: "__error__",
-          label:   "Error",
-          status:  "error",
-          message: response?.error ?? "Unknown error",
-        }];
+        // Delegate to updateAfterCopy which computes hasCopiedData and
+        // derives fieldUIStates from the FieldResult[] array.
+        this.updateAfterCopy(response.results ?? []);
         this.copyStatus = "done";
+      } else {
+        // Copy failed — reset hasCopiedData and derive all-not_copied states.
+        // Don't call updateAfterCopy for the error case because the error
+        // response carries no fieldResults to populate hasCopiedData from.
+        this.hasCopiedData  = false;
+        this.fieldUIStates  = deriveFieldUIStates(this.enabledMappings, null, null, null);
+        this.copyStatus     = "done";
       }
     },
 
@@ -886,58 +1184,28 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     //
     // The Alpine CSP expression parser does not support logical operators
     // (&&, ||) or negation of property chains in directive expressions.
-    // These three methods encapsulate the multi-condition logic so the HTML
+    // These methods encapsulate the multi-condition logic so the HTML
     // directives stay as trivial method calls.  (design D-6, SPEC §3.2)
 
-    // Returns true when the Copy Initiative button should be disabled:
-    //   (a) not on an ADO page — nothing useful to copy
-    //   (b) already copying — prevent duplicate in-flight requests
+    // Returns true when the Copy Initiative button should be disabled.
     isCopyDisabled() {
       return this.pageType !== "ado" || this.copyStatus === "copying";
     },
 
-    // Returns true when the per-field results list should be visible:
-    //   copyStatus is "done" AND there is at least one result entry.
-    hasCopyResults() {
-      return this.copyStatus === "done" && this.fieldResults.length > 0;
-    },
-
     // Returns true when the "Paste to PowerApps" button should be disabled.
-    // Delegates to the module-scope pure function so the Alpine CSP expression
-    // parser never has to evaluate the || operator in a directive.  (SPEC §3.2)
     isPasteDisabled() {
       return computeIsPasteDisabled(this.pageType, this.hasCopiedData);
     },
 
-    // Returns true when the paste result list should be visible:
-    //   pasteStatus is "done" AND pasteResults has at least one entry.
-    hasPasteResults() {
-      return computeHasPasteResults(this.pasteStatus, this.pasteResults);
-    },
-
     // ── Paste Initiative ──────────────────────────────────────────────────
-    //
-    // Sends PASTE_INITIATIVE to the service worker, which injects pa-writer.js
-    // into the active PA tab and returns per-field write results.
     //
     // Delegates to _runPasteInitiative so the async state-machine logic is
     // independently unit-testable without Alpine or a Chrome runtime.
-    // (Same design rationale as _runPasteInitiative's JSDoc above.)
     async pasteInitiative() {
       await _runPasteInitiative(this, chrome.runtime);
     },
 
     // ── Export — download settings as a JSON file ──────────────────────────
-    //
-    // Reads from the in-memory store (this.settings) rather than issuing a
-    // fresh GET_SETTINGS message.  The store is always in sync with storage
-    // after every SAVE_SETTINGS call, so a storage round-trip adds async
-    // complexity for no correctness benefit.  (design.md Decision 2)
-    //
-    // Blob URL cleanup: createObjectURL allocates a browser-internal resource.
-    // We must call revokeObjectURL() after the click to release that resource.
-    // The temporary <a> element is also removed from the DOM to keep it clean.
-    // (design.md Risks/Trade-offs — Blob URL cleanup)
     exportMappings() {
       const exportObj = {
         version:       "1.0",
@@ -950,8 +1218,6 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       const blob = new Blob([json], { type: "application/json" });
       const url  = URL.createObjectURL(blob);
 
-      // Trigger a browser file download via a temporary hidden <a> element.
-      // This is the standard cross-browser pattern — no special Chrome APIs needed.
       const a       = document.createElement("a");
       a.href        = url;
       a.download    = "ado-pa-mappings.json";
@@ -959,41 +1225,17 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-
-      // Release the object URL immediately — the browser has already queued
-      // the download so revoking now is safe and avoids memory leaks.
       URL.revokeObjectURL(url);
     },
 
     // ── Import — read a JSON file and replace settings ─────────────────────
-    //
-    // Async because FileReader is callback-based; we wrap it in a Promise so
-    // the async/await flow is linear and error handling stays in one place.
-    //
-    // Key design points:
-    //   (a) value reset — event.target.value is cleared immediately after
-    //       reading the file reference so re-selecting the same file triggers
-    //       the `change` event again (browsers suppress it if value is unchanged).
-    //       (design.md Decision 3)
-    //   (b) key-presence check — we use `'overwriteMode' in parsed` (not
-    //       truthiness) so `"overwriteMode": false` is correctly applied rather
-    //       than ignored.  (design.md Decision 4)
-    //   (c) message cleared at import start — importMessage is reset to null
-    //       before the file is read, not on a timer, so the user sees their
-    //       last result until they explicitly begin a new import.  (design.md
-    //       Decision 5)
     async importMappings(event) {
       const file = event.target.files[0];
-      if (!file) return; // user dismissed the picker — do nothing
+      if (!file) return;
 
-      // Reset the input value immediately so the same file can be re-selected
-      // later without the browser suppressing the change event.
       event.target.value = "";
-
-      // Clear any previous import result at the start of a new attempt.
       this.importMessage = null;
 
-      // Read the file as text inside a Promise so we can use async/await.
       let text;
       try {
         text = await new Promise((resolve, reject) => {
@@ -1007,7 +1249,6 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
         return;
       }
 
-      // Parse JSON — any syntax error produces the user-facing error message.
       let parsed;
       try {
         parsed = JSON.parse(text);
@@ -1016,17 +1257,12 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
         return;
       }
 
-      // Validate the parsed structure against all §4.4 rules.
       const validationError = validateImportData(parsed);
       if (validationError) {
         this.importMessage = { type: "error", text: validationError };
         return;
       }
 
-      // Build the new AppSettings object.
-      // overwriteMode: use key-presence check (not truthiness) so that
-      // `"overwriteMode": false` in the import file correctly overrides the
-      // current stored value to false.  (design.md Decision 4)
       const newSettings = {
         mappings:      parsed.mappings,
         overwriteMode: "overwriteMode" in parsed
@@ -1034,15 +1270,6 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
           : this.settings.overwriteMode,
       };
 
-      // Persist the new settings to storage via the background service worker.
-      //
-      // Why a `saveSucceeded` flag rather than reject()?
-      //   We want to stay in the async/await flow (no try/catch around the
-      //   Promise constructor) and still distinguish success from failure after
-      //   the await.  Capturing the outcome in a closure variable keeps the
-      //   callback-style chrome.runtime.sendMessage compatible with async/await
-      //   without wrapping errors as rejections — same pattern used in
-      //   addMapping() and saveSettings(). (SPEC.md §8.5)
       let saveSucceeded = true;
       await new Promise((resolve) => {
         chrome.runtime.sendMessage(
@@ -1060,20 +1287,16 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
         );
       });
 
-      // Guard: if the save failed, surface an inline error (SPEC.md §8.5).
-      // Do NOT show "success" — the settings in storage are unchanged, so
-      // continuing would leave the mapping list untouched while displaying a
-      // misleading "Mappings imported successfully." message.
       if (!saveSucceeded) {
         this.importMessage = { type: "error", text: "Failed to save settings. Please try again." };
         return;
       }
 
-      // Reload settings from storage to ensure the UI reflects what was saved.
       await new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: "GET_SETTINGS" }, (response) => {
           if (!chrome.runtime.lastError && response?.settings) {
             this.settings = response.settings;
+            this.updateEnabledMappings();
           }
           resolve();
         });
@@ -1083,11 +1306,6 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     },
 
     // ── Private helper — send SAVE_SETTINGS ───────────────────────────────
-    //
-    // Named with a leading underscore to signal "internal to the store".
-    // Centralising the sendMessage call here means every mutating method
-    // calls one line (_saveSettings()) rather than repeating the full
-    // chrome.runtime.sendMessage(...) call with its error handling. (design D-3)
     _saveSettings() {
       chrome.runtime.sendMessage(
         { action: "SAVE_SETTINGS", settings: this.settings },
@@ -1105,70 +1323,79 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
   });
 
   // ── Register adminMappingForm as an Alpine.data component ─────────────────
-  //
-  // WHY Alpine.data() and NOT a bare global function:
-  //   The Alpine CSP build's expression parser resolves x-data attribute values
-  //   by looking up names in Alpine's own registry, not in window globals.
-  //   `x-data="adminMappingForm"` (without parentheses) works only when the name
-  //   is registered here.  Leaving it as a bare global function causes the
-  //   "Undefined variable: adminMappingForm" error the CSP parser throws when it
-  //   can't resolve the name.  (design D-1; SPEC.md §3.2 CSP constraint)
   Alpine.data("adminMappingForm", adminMappingForm);
 
   // ── Hydrate pageType from the background service worker ───────────────────
-  //
-  // Why here rather than in x-init on the root element?
-  //   Calling sendMessage inside alpine:init means pageType is set before
-  //   Alpine evaluates any directive — the banner renders in the correct state
-  //   from the very first frame, with no flash of the "unsupported" default.
-  //
-  // The service worker responds synchronously from its module-level cache
-  // (see background/service-worker.js), so this callback fires immediately
-  // on the next microtask turn — well within the same rendering cycle.
   chrome.runtime.sendMessage({ action: "GET_PAGE_CONTEXT" }, (response) => {
-    if (chrome.runtime.lastError) {
-      // Service worker not yet running (rare on first load) — pageType stays
-      // "unsupported", which is the correct safe default.
-      return;
-    }
-    // spec guarantees pageType is always "ado"|"pa"|"unsupported" — all truthy
+    if (chrome.runtime.lastError) return;
     if (response?.pageType) {
       Alpine.store("app").pageType = response.pageType;
     }
   });
 
-  // ── Hydrate AppSettings from storage ──────────────────────────────────────
+  // ── Hydrate AppSettings + copiedData in parallel (design D-2) ─────────────
   //
-  // Sent immediately after GET_PAGE_CONTEXT so both initialisation calls are
-  // co-located and easy to audit. Loading eagerly means the Admin tab renders
-  // the correct mapping list from the very first frame — no flash of empty
-  // state even if the user's default tab is Admin. (design D-2)
+  // Both calls are fired simultaneously.  fieldUIStates is only derived once
+  // BOTH callbacks have resolved (initCount === 2), so there is no flash of
+  // NOT_COPIED states when the panel first opens with existing copied data.
   //
-  // If the service worker is unavailable, settings stays null (the store's
-  // initial default) — the Admin tab will show the empty state until the
-  // panel is reloaded, which is the safest fallback.
+  // Counter pattern instead of Promise.all:
+  //   Promise.all is not available as a one-liner in all Alpine CSP expression
+  //   contexts, and nesting one callback inside the other would add 1 RTT of
+  //   latency for no correctness benefit.  A simple counter is equally correct
+  //   and synchronous-friendly.  (design D-2)
+
+  let initCount = 0;
+  let initSettings = null;
+  let initCopiedData = null;
+
+  function deriveAndApplyFieldStates() {
+    // Called only after BOTH GET_SETTINGS and GET_COPIED_DATA have resolved.
+    const store = Alpine.store("app");
+    store.updateEnabledMappings();
+    store.fieldUIStates = deriveFieldUIStates(
+      store.enabledMappings,
+      initCopiedData,
+      null,
+      null
+    );
+    // Restore hasCopiedData based on session storage so the Paste/Clear
+    // buttons are correctly enabled when the panel reopens with prior data.
+    store.hasCopiedData = computeHasCopiedData(initCopiedData);
+  }
+
   chrome.runtime.sendMessage({ action: "GET_SETTINGS" }, (response) => {
     if (chrome.runtime.lastError) {
       // Service worker not yet running — settings remains null (safe default).
-      return;
-    }
-    if (response?.settings) {
+    } else if (response?.settings) {
       Alpine.store("app").settings = response.settings;
+      initSettings = response.settings;
     }
+    initCount += 1;
+    if (initCount === 2) deriveAndApplyFieldStates();
+  });
+
+  chrome.runtime.sendMessage({ action: "GET_COPIED_DATA" }, (response) => {
+    if (!chrome.runtime.lastError && response?.data) {
+      initCopiedData = response.data;
+    }
+    initCount += 1;
+    if (initCount === 2) deriveAndApplyFieldStates();
   });
 
 }); // end alpine:init
 
 // ─── Test Export ──────────────────────────────────────────────────────────────
-// Allow unit tests (Vitest / Node.js) to import validateImportData without a
-// browser runtime.  The guard ensures this line is a no-op when loaded by Chrome
-// (Chrome's module system does not expose `module`).
+// Allow unit tests (Vitest / Node.js) to import pure functions without a
+// browser runtime.  The guard ensures this line is a no-op when loaded by Chrome.
 // Same pattern as detectPageType in service-worker.js. (design.md Decision 1)
 if (typeof module !== "undefined") {
   module.exports = {
     validateImportData,
     computeIsPasteDisabled,
-    computeHasPasteResults,
+    computeHasCopiedData,
+    computeIsClearDisabled,
+    deriveFieldUIStates,
     _runPasteInitiative,
   };
 }
