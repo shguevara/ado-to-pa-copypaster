@@ -696,6 +696,90 @@ function adminMappingForm() {
   };
 }
 
+// ─── Field-row secondary-line helpers — module-scope pure functions ───────────
+//
+// WHY extracted here rather than left as Alpine store methods?
+//   Phase 12 design D-1: extracting as module-scope pure functions allows
+//   Vitest to import and unit-test them directly in Node.js — no Alpine
+//   mounting, no JSDOM, no mocking of `this`.  This is the same testability
+//   pattern used for deriveFieldUIStates, computeHasCopiedData, and
+//   computeIsClearDisabled (Phase 11).  The Alpine store methods below are
+//   kept as one-liner delegations so CSP-safe directives continue to call
+//   `$store.app.getFieldSecondaryText(state)` without any change.
+//
+// Secondary line rule (spec §7.2 user-tab-field-states):
+//   paste_failed / skipped  → copiedValue (if non-empty) + " — " + message (if non-empty)
+//   copy_failed             → message only
+//   copied / pasted         → copiedValue only
+//   not_copied              → "" (nothing shown)
+
+/**
+ * Returns the secondary-line text for a FieldUIState row.
+ *
+ * For `paste_failed` and `skipped`, the reviewer (COMMENTS.md 🟡) noted that
+ * the previous implementation showed only `state.message`, omitting the
+ * `copiedValue`.  The corrected rule: build a `parts` array from whichever of
+ * copiedValue and message are non-empty, then join with " — ".  This ensures
+ * the user always sees what value was attempted, even when the paste failed or
+ * was skipped.
+ *
+ * @param {object} state - A FieldUIState: { state, copiedValue, message }
+ * @returns {string}
+ */
+function getFieldSecondaryText(state) {
+  // paste_failed / skipped: show copiedValue (if any) + " — " + message (if any).
+  // Using a parts array + join avoids conditional string concatenation and
+  // naturally handles all four combinations (both, value-only, message-only, neither).
+  if (state.state === "paste_failed" || state.state === "skipped") {
+    var parts = [];
+    if (state.copiedValue !== null && state.copiedValue !== "") parts.push(state.copiedValue);
+    if (state.message     !== null && state.message     !== "") parts.push(state.message);
+    return parts.join(" \u2014 ");   // " — " (em-dash, design D-2)
+  }
+  // copy_failed: show the error message only (no copiedValue was captured).
+  if (state.state === "copy_failed") {
+    return state.message || "";
+  }
+  // copied / pasted: show the value that was read from ADO / written to PA.
+  if (state.state === "copied" || state.state === "pasted") {
+    return state.copiedValue !== null ? state.copiedValue : "";
+  }
+  // not_copied (and any unknown state): nothing to show.
+  return "";
+}
+
+/**
+ * Returns true when the secondary line should be visible for a FieldUIState row.
+ *
+ * For `paste_failed` and `skipped`, the secondary line is visible when EITHER
+ * `state.copiedValue` (non-null, non-empty) OR `state.message` (non-null,
+ * non-empty) is present — matching the corrected secondary-line text rule above.
+ * The previous implementation checked only `state.message`, hiding the line when
+ * a field was skipped/failed but the error had no message.  (COMMENTS.md 🟡)
+ *
+ * @param {object} state - A FieldUIState: { state, copiedValue, message }
+ * @returns {boolean}
+ */
+function showFieldSecondary(state) {
+  // paste_failed / skipped: visible when either piece of information is present.
+  if (state.state === "paste_failed" || state.state === "skipped") {
+    return !!(
+      (state.copiedValue !== null && state.copiedValue !== "") ||
+      (state.message     !== null && state.message     !== "")
+    );
+  }
+  // copy_failed: visible when there is an error message to display.
+  if (state.state === "copy_failed") {
+    return !!(state.message);
+  }
+  // copied / pasted: visible when a non-empty value was captured.
+  if (state.state === "copied" || state.state === "pasted") {
+    return state.copiedValue !== null && state.copiedValue !== "";
+  }
+  // not_copied (and any unknown state): never show.
+  return false;
+}
+
 // ─── Alpine store registration + initial hydration ───────────────────────────
 //
 // 'alpine:init' fires once, synchronously, during Alpine's startup — after
@@ -1127,17 +1211,14 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
 
     // Returns the secondary-line text (value or error message) for a field row.
     // Returns "" when nothing should be shown.
+    //
+    // WHY a one-liner delegation?
+    //   The logic is now in the module-scope pure function getFieldSecondaryText()
+    //   so Vitest can test it directly (design D-1).  The store method must stay
+    //   here because Alpine CSP-safe directives call $store.app.getFieldSecondaryText()
+    //   — they cannot reference a plain module-scope function.
     getFieldSecondaryText(state) {
-      if (state.state === "copy_failed" || state.state === "paste_failed") {
-        return state.message || "";
-      }
-      if (state.state === "skipped") {
-        return state.message || "";
-      }
-      if (state.state === "copied" || state.state === "pasted") {
-        return state.copiedValue !== null ? state.copiedValue : "";
-      }
-      return "";
+      return getFieldSecondaryText(state);
     },
 
     // Returns the CSS class for the secondary-line span.
@@ -1152,18 +1233,13 @@ if (typeof document !== "undefined") document.addEventListener("alpine:init", ()
     },
 
     // Returns true when the secondary line should be visible for a field row.
-    // Visible when: copied/pasted with a non-null copiedValue, OR failed/skipped.
+    // Visible when: copied/pasted with a non-null copiedValue, OR when either
+    // copiedValue or message is present for paste_failed/skipped.
+    //
+    // WHY a one-liner delegation? Same reason as getFieldSecondaryText() above —
+    // logic lives in the module-scope pure function so Vitest can test it.
     showFieldSecondary(state) {
-      if (state.state === "copy_failed" || state.state === "paste_failed") {
-        return !!(state.message);
-      }
-      if (state.state === "skipped") {
-        return !!(state.message);
-      }
-      if (state.state === "copied" || state.state === "pasted") {
-        return state.copiedValue !== null && state.copiedValue !== "";
-      }
-      return false;
+      return showFieldSecondary(state);
     },
 
     // ── Copy Initiative ───────────────────────────────────────────────────
@@ -1425,5 +1501,7 @@ if (typeof module !== "undefined") {
     computeIsClearDisabled,
     deriveFieldUIStates,
     _runPasteInitiative,
+    getFieldSecondaryText,
+    showFieldSecondary,
   };
 }

@@ -26,7 +26,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { deriveFieldUIStates, computeHasCopiedData, computeIsClearDisabled } from "../sidepanel/app.js";
+import {
+  deriveFieldUIStates,
+  computeHasCopiedData,
+  computeIsClearDisabled,
+  getFieldSecondaryText,
+  showFieldSecondary,
+} from "../sidepanel/app.js";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -394,6 +400,185 @@ describe("computeIsClearDisabled", () => {
 
   it("returns false when hasCopiedData is true (Clear button should be enabled)", () => {
     expect(computeIsClearDisabled(true)).toBe(false);
+  });
+
+});
+
+// ── getFieldSecondaryText ──────────────────────────────────────────────────────
+//
+// TDD — these tests were written BEFORE the implementation was extracted to
+// module scope.  They drive the corrected paste_failed / skipped behaviour
+// described in the phase-12 proposal and COMMENTS.md 🟡 item.
+//
+// Secondary line rule (spec §7.2):
+//   paste_failed / skipped: show "copiedValue — message" (both non-empty),
+//     or copiedValue only, or message only, whichever are present.
+//   copy_failed: message only (unchanged).
+//   copied / pasted: copiedValue only (unchanged).
+//   not_copied: "" (unchanged).
+
+describe("getFieldSecondaryText", () => {
+
+  // ── paste_failed ────────────────────────────────────────────────────────────
+
+  // 1.1 — both copiedValue and message present → join with " — "
+  it("paste_failed: returns 'copiedValue — message' when both are present", () => {
+    const state = { state: "paste_failed", copiedValue: "Initiative Alpha", message: "No match" };
+    expect(getFieldSecondaryText(state)).toBe("Initiative Alpha \u2014 No match");
+  });
+
+  // 1.2 — copiedValue present, message null → copiedValue only
+  it("paste_failed: returns copiedValue only when message is null", () => {
+    const state = { state: "paste_failed", copiedValue: "Initiative Alpha", message: null };
+    expect(getFieldSecondaryText(state)).toBe("Initiative Alpha");
+  });
+
+  // 1.3 — copiedValue null, message present → message only (unchanged behaviour)
+  it("paste_failed: returns message only when copiedValue is null", () => {
+    const state = { state: "paste_failed", copiedValue: null, message: "No match" };
+    expect(getFieldSecondaryText(state)).toBe("No match");
+  });
+
+  // 1.4 — both null → empty string
+  it("paste_failed: returns '' when both copiedValue and message are null", () => {
+    const state = { state: "paste_failed", copiedValue: null, message: null };
+    expect(getFieldSecondaryText(state)).toBe("");
+  });
+
+  // ── skipped ─────────────────────────────────────────────────────────────────
+
+  // 1.5 — both copiedValue and message present → join with " — "
+  it("skipped: returns 'copiedValue — message' when both are present", () => {
+    const state = { state: "skipped", copiedValue: "Initiative Alpha", message: "Field already has value" };
+    expect(getFieldSecondaryText(state)).toBe("Initiative Alpha \u2014 Field already has value");
+  });
+
+  // 1.6 — copiedValue present, message null → copiedValue only
+  it("skipped: returns copiedValue only when message is null", () => {
+    const state = { state: "skipped", copiedValue: "Initiative Alpha", message: null };
+    expect(getFieldSecondaryText(state)).toBe("Initiative Alpha");
+  });
+
+  // 1.7 — copiedValue null, message present → message only (unchanged behaviour)
+  it("skipped: returns message only when copiedValue is null", () => {
+    const state = { state: "skipped", copiedValue: null, message: "Field already has value" };
+    expect(getFieldSecondaryText(state)).toBe("Field already has value");
+  });
+
+  // 1.8 — both null → empty string
+  it("skipped: returns '' when both copiedValue and message are null", () => {
+    const state = { state: "skipped", copiedValue: null, message: null };
+    expect(getFieldSecondaryText(state)).toBe("");
+  });
+
+  // ── Regression: other states must be unchanged ───────────────────────────────
+
+  it("copy_failed: returns message only", () => {
+    const state = { state: "copy_failed", copiedValue: null, message: "Selector not found" };
+    expect(getFieldSecondaryText(state)).toBe("Selector not found");
+  });
+
+  it("copied: returns copiedValue", () => {
+    const state = { state: "copied", copiedValue: "Initiative Alpha", message: null };
+    expect(getFieldSecondaryText(state)).toBe("Initiative Alpha");
+  });
+
+  it("pasted: returns copiedValue", () => {
+    const state = { state: "pasted", copiedValue: "Initiative Alpha", message: null };
+    expect(getFieldSecondaryText(state)).toBe("Initiative Alpha");
+  });
+
+  it("not_copied: returns ''", () => {
+    const state = { state: "not_copied", copiedValue: null, message: null };
+    expect(getFieldSecondaryText(state)).toBe("");
+  });
+
+});
+
+// ── showFieldSecondary ─────────────────────────────────────────────────────────
+//
+// TDD — written before extraction.  Covers the corrected paste_failed / skipped
+// visibility rule: show secondary when EITHER copiedValue OR message is present.
+// (task 1.9: regression tests for all other states also included here)
+
+describe("showFieldSecondary", () => {
+
+  // ── paste_failed ────────────────────────────────────────────────────────────
+
+  it("paste_failed: returns true when both copiedValue and message are present", () => {
+    const state = { state: "paste_failed", copiedValue: "Initiative Alpha", message: "No match" };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  // 1.2 (visibility half) — copiedValue only → must show
+  it("paste_failed: returns true when copiedValue is present and message is null", () => {
+    const state = { state: "paste_failed", copiedValue: "Initiative Alpha", message: null };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  it("paste_failed: returns true when message is present and copiedValue is null", () => {
+    const state = { state: "paste_failed", copiedValue: null, message: "No match" };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  // 1.4 (visibility half) — both null → must hide
+  it("paste_failed: returns false when both copiedValue and message are null", () => {
+    const state = { state: "paste_failed", copiedValue: null, message: null };
+    expect(showFieldSecondary(state)).toBe(false);
+  });
+
+  // ── skipped ─────────────────────────────────────────────────────────────────
+
+  it("skipped: returns true when both copiedValue and message are present", () => {
+    const state = { state: "skipped", copiedValue: "Initiative Alpha", message: "Field already has value" };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  // 1.6 (visibility half) — copiedValue only → must show
+  it("skipped: returns true when copiedValue is present and message is null", () => {
+    const state = { state: "skipped", copiedValue: "Initiative Alpha", message: null };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  it("skipped: returns true when message is present and copiedValue is null", () => {
+    const state = { state: "skipped", copiedValue: null, message: "Field already has value" };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  // 1.8 (visibility half) — both null → must hide
+  it("skipped: returns false when both copiedValue and message are null", () => {
+    const state = { state: "skipped", copiedValue: null, message: null };
+    expect(showFieldSecondary(state)).toBe(false);
+  });
+
+  // ── Regression: other states (task 1.9) ──────────────────────────────────────
+  //
+  // Confirms that existing correct behaviour for all other states is preserved
+  // after the extraction refactor.  (spec §7.2 secondary line visibility rules)
+
+  it("not_copied: returns false", () => {
+    const state = { state: "not_copied", copiedValue: null, message: null };
+    expect(showFieldSecondary(state)).toBe(false);
+  });
+
+  it("copied with non-empty copiedValue: returns true", () => {
+    const state = { state: "copied", copiedValue: "Initiative Alpha", message: null };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  it("copied with empty copiedValue: returns false", () => {
+    const state = { state: "copied", copiedValue: "", message: null };
+    expect(showFieldSecondary(state)).toBe(false);
+  });
+
+  it("copy_failed with message: returns true", () => {
+    const state = { state: "copy_failed", copiedValue: null, message: "Selector not found" };
+    expect(showFieldSecondary(state)).toBe(true);
+  });
+
+  it("pasted with non-empty copiedValue: returns true", () => {
+    const state = { state: "pasted", copiedValue: "Initiative Alpha", message: null };
+    expect(showFieldSecondary(state)).toBe(true);
   });
 
 });
