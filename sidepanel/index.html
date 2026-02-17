@@ -193,21 +193,6 @@
           :disabled="$store.app.isCopyDisabled()"
         >Copy Initiative</button>
 
-        <!--
-          Clear button — Phase 11 (§5.1; spec: user-tab-field-states §Clear button).
-
-          Clicking sends CLEAR_COPIED_DATA to the service worker, then resets
-          all field rows to NOT COPIED and disables both Clear and Paste.
-
-          isClearDisabled() delegates to computeIsClearDisabled(this.hasCopiedData)
-          in JS — the Alpine CSP build cannot evaluate the ! operator in a
-          :disabled binding.  (SPEC.md §3.2; design D-7)
-        -->
-        <button
-          class="btn btn--clear"
-          @click="$store.app.clearCopiedData()"
-          :disabled="$store.app.isClearDisabled()"
-        >Clear</button>
 
         <!--
           Paste to PowerApps button — Phase 10 (§7.2, design D-8).
@@ -233,6 +218,22 @@
           @click="$store.app.pasteInitiative()"
           :disabled="$store.app.isPasteDisabled()"
         >Paste to PowerApps</button>
+
+        <!--
+          Clear button — Phase 11 (§5.1; spec: user-tab-field-states §Clear button).
+
+          Clicking sends CLEAR_COPIED_DATA to the service worker, then resets
+          all field rows to NOT COPIED and disables both Clear and Paste.
+
+          isClearDisabled() delegates to computeIsClearDisabled(this.hasCopiedData)
+          in JS — the Alpine CSP build cannot evaluate the ! operator in a
+          :disabled binding.  (SPEC.md §3.2; design D-7)
+        -->
+        <button
+          class="btn btn--clear"
+          @click="$store.app.clearCopiedData()"
+          :disabled="$store.app.isClearDisabled()"
+        >Clear</button>        
 
         <!--
           Spinner for Paste is now inside .context-banner__row--pa above —
