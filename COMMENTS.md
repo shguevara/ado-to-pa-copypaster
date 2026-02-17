@@ -1,122 +1,102 @@
-# Code Review: phase-2-tab-detection-messaging
+# Code Review: phase-13
+
+**Branch / commits reviewed**: `e44d0f7` (fix(ux): field-row card style, tab panel tint, equal-width action buttons) — on `master`
+**Reviewer date**: 2026-02-17
+**Change scope**: `sidepanel/styles.css` only — three targeted CSS-only edits (tab panel background tint, field-row card style, action buttons equal-width distribution)
+
+---
 
 ## Summary
 
-Phase 2 replaces the Phase 1 service worker stub with a complete tab-detection and messaging implementation. The code is clean, well-documented, and correct. All 4 spec requirements are implemented, all 4 design decisions are followed, all 14 tasks are marked done, and 12 unit tests pass. **No blocking issues. Change is ready for archive.**
+Phase-13 delivers three CSS-only UX polish changes to `sidepanel/styles.css`: a subtle warm-gray tint on `[role="tabpanel"]`, field rows converted to rounded white cards with margin-gap separation (removing the flat `border-bottom` separator), and an equal-width flex rule for `.action-buttons > *`. The implementation is clean, minimal, and exactly matches the agreed spec and design decisions. **No blockers. Ready for archive.**
 
 ---
 
 ## OpenSpec Verify
 
-**Change**: `phase-2-tab-detection-messaging`
-**Schema**: spec-driven
-**Artifacts checked**: proposal.md, design.md, specs/tab-detection-messaging/spec.md, tasks.md
+### Summary
 
-### Summary Scorecard
+| Dimension    | Status                                        |
+|--------------|-----------------------------------------------|
+| Completeness | 9/9 tasks ✅ · 3/3 requirements ✅ · 5/5 scenarios ✅ |
+| Correctness  | All requirements implemented correctly ✅      |
+| Coherence    | All design decisions (D-1, D-2, D-3) followed ✅ |
 
-| Dimension    | Status                                      |
-|--------------|---------------------------------------------|
-| Completeness | 14/14 tasks ✅ · 4 requirements ✅          |
-| Correctness  | 4/4 requirements implemented ✅ · 12/12 unit tests pass ✅ |
-| Coherence    | All 4 design decisions (D-1–D-4) followed ✅ |
+### Issues
 
-### Completeness
+**CRITICAL** — None.
 
-All tasks checked and marked `[x]`. No incomplete items.
+**WARNING** — None.
 
-**Spec requirements mapped to implementation:**
+**SUGGESTION** — None.
 
-| Requirement | File | Implementation |
-|---|---|---|
-| Req 1: `detectPageType(url)` | `background/service-worker.js:35–59` | Pure function, URL pattern matching per §6.1 |
-| Req 2: Tab event listeners + cache + `TAB_CHANGED` push | `service-worker.js:85–145` | `onActivated`, `onUpdated`, `updatePageType` |
-| Req 3: `GET_PAGE_CONTEXT` message handler | `service-worker.js:152–159` | Synchronous response from cache |
-| Req 4: `chrome.action.onClicked` → side panel | `service-worker.js:118–120` | `chrome.sidePanel.open({ windowId })` |
+**Final Assessment**: All checks passed. Ready for archive.
 
-### Correctness
+---
 
-All 6 delta-spec scenarios have implementation evidence and/or direct test coverage:
+## Requirement Verification
 
-| Scenario | Evidence |
-|---|---|
-| ADO dev.azure.com → `"ado"` | `detectPageType:49` + test line 20 |
-| ADO visualstudio.com → `"ado"` | `detectPageType:49` + test line 28 |
-| PA dynamics.com → `"pa"` | `detectPageType:54` + test line 46 |
-| PA powerapps.com → `"pa"` | `detectPageType:54` + test line 42 |
-| google.com → `"unsupported"` | `detectPageType:58` + test line 56 |
-| ADO non-workitems path → `"unsupported"` | `detectPageType:48–51` + test line 32 |
+### Requirement 1: Tab panel visual styling
 
-No-receiver error silently swallowed (`service-worker.js:102–104`). Cache defaults to `"unsupported"` at module scope (`service-worker.js:71`).
+- **Spec**: `[role="tabpanel"]` SHALL include `background: #6b728008` in addition to existing `flex: 1`, `overflow-y: auto`, `padding: 12px 14px`.
+- **Implementation** (`sidepanel/styles.css:87–91`): `background: #6b728008` added. All three existing properties verified unchanged in the diff context.
+- **Result**: ✅ PASS
 
-### Coherence
+### Requirement 2: Field row card visual style
 
-| Design Decision | Implemented |
-|---|---|
-| D-1: Module-level `currentPageType` variable | `service-worker.js:71` ✅ |
-| D-2: `onUpdated` OR filter (`changeInfo.url` \|\| `status === "complete"`) | `service-worker.js:134` ✅ |
-| D-3: `chrome.runtime.sendMessage` for push | `service-worker.js:98` ✅ |
-| D-4: `chrome.sidePanel.open({ windowId })` on action click | `service-worker.js:119` ✅ |
+- **Spec**: `.field-row` SHALL include `background: #ffffff`, `margin: 10px 0`, `border-radius: 10px`; SHALL NOT include `border-bottom`.
+- **Implementation** (`sidepanel/styles.css:341–357`):
+  - `background: #ffffff` added ✅
+  - `margin: 10px 0` added ✅
+  - `border-radius: 10px` added ✅
+  - `border-bottom: 1px solid #F3F4F6` removed ✅
+  - `:first-child { margin-top: 0 }` and `:last-child { margin-bottom: 0 }` guard rules added proactively (task 2.3 allows this; sound reasoning — `padding: 12px 14px` on the tabpanel would otherwise double-pad the edges) ✅
+- **Result**: ✅ PASS
 
-**Final assessment**: No critical issues. No warnings. Change is ready for archive.
+### Requirement 3: Action buttons equal-width distribution
+
+- **Spec**: `.action-buttons > * { flex: 1 1 0; }` SHALL be added immediately after the `.action-buttons { ... }` block. Direct-child combinator, not `.btn`.
+- **Implementation** (`sidepanel/styles.css:207–220`): Rule placed immediately after `.action-buttons {}` closing brace. Comment explains D-2 rationale (spinner relocation to context banner rows in `7d2259f`; `> *` avoids class coupling).
+- **Result**: ✅ PASS
+
+### Scenario: Spinner elements inside context banners are unaffected
+
+- **Spec**: Spinners are inside `.context-banner` rows, not direct children of `.action-buttons` — the `> *` rule SHALL NOT resize them.
+- **Implementation**: Confirmed by commit `7d2259f` (parent commit) which relocated spinners out of `.action-buttons`. The `> *` selector correctly scopes to direct children only.
+- **Result**: ✅ PASS
 
 ---
 
 ## 🔴 Must Fix
 
-_None._
+*(none)*
 
 ---
 
 ## 🟡 Should Fix
 
-_None._
+*(none)*
 
 ---
 
 ## 🟢 Nice to Have
 
-### `service-worker.js:95–98` — `TAB_CHANGED` broadcasts unconditionally, even when `pageType` is unchanged
-
-- **Observation**: `updatePageType` always calls `chrome.runtime.sendMessage` regardless of whether `newType === currentPageType`. Navigating between two ADO work items fires two broadcasts (once for `changeInfo.url`, once for `changeInfo.status === "complete"`), both with `pageType: "ado"`.
-- **Why it's not a bug**: design.md D-2 explicitly documents and accepts this: *"The small risk of a double `TAB_CHANGED` broadcast is acceptable — the side panel is idempotent on repeated identical `pageType` values."*
-- **Suggestion**: A single `if (newType !== currentPageType)` guard before the `sendMessage` call would eliminate all redundant broadcasts cheaply. Worth considering in Phase 3 when the side panel wires up its listener.
-
-### `service-worker.js:102–104` — Error-message string filter is brittle across Chrome versions
-
-- **Observation**: The `sendMessage` catch block silences errors only when `err.message?.includes("Receiving end does not exist")`. If Chrome changes this string in a future version, genuine no-receiver errors would start appearing in `console.error`.
-- **Why it's acceptable**: The task spec called for logging non-receiver errors. The string has been stable across Chrome versions. For this internal-tool use case the risk is very low.
-- **Suggestion**: If `console.error` noise becomes an issue in practice, replacing the discriminated catch with an unconditional swallow is a valid future trade-off.
+*(none)*
 
 ---
 
 ## ⚪ Out of Scope (defer to future change)
 
-- **Side panel `TAB_CHANGED` listener**: `sidepanel/app.js` does not yet register `chrome.runtime.onMessage` for `TAB_CHANGED`. Correct — side panel is still a stub. This is Phase 3 scope.
-- **`GET_PAGE_CONTEXT` call on side panel mount**: Not yet called. Phase 3 scope.
-- **`onInstalled` default settings seed**: Phase 4 scope.
-- **Phase 1 note resolved**: The `chrome.sidePanel.setPanelBehavior` call from Phase 1 has been correctly replaced by the explicit `chrome.action.onClicked` handler. No coexistence concern remains.
+*(none)*
 
 ---
 
 ## Missing Tests
 
-All spec scenarios covered. No gaps.
-
-- [x] ADO `dev.azure.com` work item URL → `"ado"`
-- [x] ADO `dev.azure.com` work items list URL → `"ado"`
-- [x] ADO `visualstudio.com` work item URL → `"ado"`
-- [x] ADO boards URL (no `/_workitems/`) → `"unsupported"`
-- [x] ADO git repo URL → `"unsupported"`
-- [x] `make.powerapps.com` → `"pa"`
-- [x] `myorg.crm.dynamics.com` → `"pa"`
-- [x] `myorg.crm4.dynamics.com` (regional) → `"pa"`
-- [x] `google.com` → `"unsupported"`
-- [x] `github.com` → `"unsupported"`
-- [x] Empty string → `"unsupported"`
-- [x] Malformed URL → `"unsupported"`
+None required — design decision D-3 explicitly excludes automated tests for CSS-only changes (project has no visual regression infrastructure; manual QA is sufficient and was performed).
 
 ---
 
 ## Questions for Author
 
-_None. Implementation is clear, well-commented, and matches the agreed design._
+None. The implementation is self-explanatory, fully commented, and consistent with all agreed artifacts.

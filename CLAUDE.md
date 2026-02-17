@@ -167,6 +167,9 @@ Rules:
 Correct pattern:
 cd /c/path/to/repo && git status
 
+Default branch: master  
+Do not assume branch name "main".
+
 Avoid:
 git -C "C:\path"
 

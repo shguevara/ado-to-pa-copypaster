@@ -28,6 +28,21 @@ This is your frame of reference. You are reviewing **this change**, not the enti
 ### Step 2 — Run `/opsx:verify`
 Run `/opsx:verify`. Record its output — it becomes the **"OpenSpec Verify"** section of `COMMENTS.md`.
 
+#### /opsx:verify Auto-Run Preamble (No Prompting)
+
+Immediately after invoking `/opsx:verify`, automatically:
+
+1) Check OpenSpec status for the current phase.
+2) Load the change instructions and context files for the current phase
+   (proposal, design, specs, tasks).
+3) Produce diff stats from master to HEAD:
+   - `git diff --stat`
+   - `git log master..HEAD --oneline`
+   - If "master" does not exist, auto-detect the default branch.
+
+Do not ask for confirmation before running these.
+Only ask questions after these steps complete and only if truly blocked.
+
 ### Step 3 — Read `SPEC.md`
 Read `SPEC.md` to cross-check correctness of the implementation against overall requirements, business rules, and data contracts.
 

@@ -11,7 +11,7 @@ This project uses **OpenSpec** to manage implementation tasks. Before writing an
 1. Check `openspec/changes/` for a pending change directory (any subdirectory that is **not** `archive/`).
 2. If a change exists, run **`/opsx:apply`** to load the task list from that change's artifacts. Work through tasks in the order given by the change — do not invent your own task breakdown.
 3. If no change exists, ask the user to create one with **`/opsx:new`** before proceeding.
-4. When all tasks for a change are complete, run **`/opsx:verify`** to validate implementation against the change artifacts before declaring work done.
+4. When all tasks for a change are complete let the user know so he can launch `REVIEWER.md` for code review.
 
 > **Why**: OpenSpec change artifacts (proposal → spec → tasks) capture the agreed scope and acceptance criteria for a piece of work. Skipping them means you may implement the wrong thing or miss agreed constraints.
 
@@ -75,6 +75,53 @@ This project uses **OpenSpec** to manage implementation tasks. Before writing an
 
 ---
 
+## 8. Project Guardrails (Derived from Retrospectives)
+
+These rules are mandatory and override stylistic preference. They exist because
+we previously shipped bugs in these areas.
+
+### 8.1 SAVE_SETTINGS Pattern
+
+- Never surface success UI unless the save operation is confirmed successful.
+- All SAVE_SETTINGS calls must use a callback-flag guard pattern.
+- Do not assume success inside async callbacks.
+
+### 8.2 Validation Coverage Rules
+
+- For REQUIRED_FIELDS arrays:
+  - Write one test per field entry.
+  - Do not rely on representative tests.
+  - Achieve 100% rule coverage as defined in SPEC.md.
+- For fields defined as "non-empty string":
+  - Required-field guard must include:
+    entry[field] == null || entry[field] === ""
+
+### 8.3 Alpine CSP Rules (Chrome MV3)
+
+Directive expressions must NOT use:
+- Optional chaining (?.)
+- Nullish coalescing (??)
+- Template literals
+- Arrow functions
+- Direct assignment to $store.*
+
+Required patterns:
+- All state mutations must be exposed as store methods.
+- All x-data components must be registered via Alpine.data().
+- A root x-data wrapper must exist before any directives are added.
+
+### 8.4 Storage Seeding
+
+- Do not filter onInstalled by reason when seeding defaults.
+- Guard by storage state (result.settings == null), not event metadata.
+
+### 8.5 Message Testing
+
+- Never test onMessage handlers from the service worker console.
+- Always send test messages from a different extension context.
+
+---
+
 ## Summary Workflow
 ```
 0. Check openspec/changes/ for a pending change
@@ -89,5 +136,5 @@ This project uses **OpenSpec** to manage implementation tasks. Before writing an
    d. Comment the "why" clearly for less-experienced readers
    e. Run build + tests → all green
    f. Commit with a clear message
-4. When all tasks done → signal done to reviewer (do NOT run /opsx:verify or /opsx:archive — those belong to the reviewer)
+4. When all tasks done → signal done to REVIEWER (do NOT run /opsx:verify or /opsx:archive — those belong to the reviewer)
 ```
