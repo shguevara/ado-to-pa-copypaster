@@ -85,16 +85,40 @@
           banner is compact and immediately scannable.  (spec: sidepanel-shell
           §MODIFIED banner; design D-7)
         -->
+        <!--
+          Copy spinner lives here — inside the ADO banner row — so it never
+          causes layout shift in the action-buttons bar below.  margin-left:auto
+          (via CSS) pushes it to the far right of the banner row flex container.
+          Visible only while copyStatus === 'copying'.  (phase-12 UX fix)
+        -->
         <div class="context-banner__row context-banner__row--ado"
              x-show="$store.app.pageType === 'ado'">
           <span class="context-dot" aria-hidden="true"></span>
           <span>Azure DevOps</span>
+          <div
+            class="spinner"
+            x-show="$store.app.copyStatus === 'copying'"
+            role="status"
+            aria-label="Copying in progress…"
+            x-cloak
+          ></div>
         </div>
 
+        <!--
+          Paste spinner lives here — inside the PA banner row — same rationale.
+          Visible only while pasteStatus === 'pasting'.  (phase-12 UX fix)
+        -->
         <div class="context-banner__row context-banner__row--pa"
              x-show="$store.app.pageType === 'pa'">
           <span class="context-dot" aria-hidden="true"></span>
           <span>PowerApps</span>
+          <div
+            class="spinner"
+            x-show="$store.app.pasteStatus === 'pasting'"
+            role="status"
+            aria-label="Pasting in progress…"
+            x-cloak
+          ></div>
         </div>
 
         <div class="context-banner__row context-banner__row--unsupported"
@@ -158,25 +182,16 @@
           buttons are unaffected.  (spec: sidepanel-shell §ADDED button styling;
           MT-35)
         -->
+        <!--
+          Spinner for Copy is now inside .context-banner__row--ado above —
+          keeping it out of this flex row prevents layout shift in the field
+          list when copying starts or finishes.  (phase-12 UX fix)
+        -->
         <button
           class="btn btn--copy"
           @click="$store.app.copyInitiative()"
           :disabled="$store.app.isCopyDisabled()"
         >Copy Initiative</button>
-
-        <!--
-          Spinner — visible while COPY_INITIATIVE is in flight.
-          role="status" + aria-label announces to screen readers that copying
-          is in progress.  The spinner disappears as soon as copyStatus
-          transitions from "copying" to "done".  (design D-6)
-        -->
-        <div
-          class="spinner"
-          x-show="$store.app.copyStatus === 'copying'"
-          role="status"
-          aria-label="Copying in progress…"
-          x-cloak
-        ></div>
 
         <!--
           Clear button — Phase 11 (§5.1; spec: user-tab-field-states §Clear button).
@@ -220,18 +235,9 @@
         >Paste to PowerApps</button>
 
         <!--
-          Spinner — visible while PASTE_INITIATIVE is in flight.
-          role="status" + aria-label announces to screen readers that pasting
-          is in progress.  The spinner disappears as soon as pasteStatus
-          transitions from "pasting" to "done".  (design D-8)
+          Spinner for Paste is now inside .context-banner__row--pa above —
+          same rationale as the Copy spinner move.  (phase-12 UX fix)
         -->
-        <div
-          class="spinner"
-          x-show="$store.app.pasteStatus === 'pasting'"
-          role="status"
-          aria-label="Pasting in progress…"
-          x-cloak
-        ></div>
       </div>
 
       <!-- Fields Section ──────────────────────────────────────────────────── -->

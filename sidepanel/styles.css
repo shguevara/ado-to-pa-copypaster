@@ -167,6 +167,34 @@ body {
 .context-banner__row--pa          .context-dot { background-color: #7B1FA2; }
 .context-banner__row--unsupported .context-dot { background-color: #9CA3AF; }
 
+/* ── Spinner inside context banner rows (phase-12 UX fix) ────────────────────
+   Each operation's spinner lives inside its corresponding banner row so it
+   never inserts/removes itself from the action-buttons flex row — which was
+   causing the button bar and field list below to shift for a micro-second.
+
+   margin-left: auto pushes the spinner to the far right of the banner's own
+   flex container, aligned with the right edge of the panel.
+
+   Colors are tinted to match each banner variant so the spinner feels native
+   to the banner rather than visually foreign.
+*/
+.context-banner__row .spinner {
+  margin-left: auto;     /* push to far right within the banner flex row */
+  flex-shrink: 0;
+}
+
+/* ADO banner — match the #1565C0 / #90CAF9 ADO blue palette */
+.context-banner__row--ado .spinner {
+  border-color:     #90CAF9;
+  border-top-color: #1565C0;
+}
+
+/* PA banner — match the #7B1FA2 / #CE93D8 PowerApps purple palette */
+.context-banner__row--pa .spinner {
+  border-color:     #CE93D8;
+  border-top-color: #7B1FA2;
+}
+
 /* ─── Action Buttons  (Phase 7 / 10 / 11) ─────────────────────────────────── */
 
 .action-buttons {
