@@ -88,6 +88,7 @@ body {
   flex: 1;
   overflow-y: auto;     /* each panel scrolls independently */
   padding: 12px 14px;
+  background: #6b728008; /* very low-opacity warm-gray tint — gives depth so white field-row cards visually pop */
 }
 
 /* ─── Page Context Banner (Phase 11 — brand colours) ───────────────────────── */
@@ -206,6 +207,18 @@ body {
   flex-wrap: wrap;       /* gracefully stacks on very narrow panels */
 }
 
+/* Phase 13: Make all direct children (Copy, Paste, Clear buttons) share the
+   available row width equally, regardless of label length.
+   Why > * instead of .btn?
+     The spinners that were formerly direct children of .action-buttons were
+     relocated to the context banner rows (commit 7d2259f).  Only the three
+     <button> elements remain as direct children.  Using the direct-child
+     combinator instead of a class selector avoids coupling this layout rule to
+     a specific class name and keeps the selector minimal (design D-2). */
+.action-buttons > * {
+  flex: 1 1 0;
+}
+
 /* Phase 11: All action buttons in the User Tab are taller (48px) with a
    smaller font (12px) so they read well at the compact panel width.
    (spec: sidepanel-shell §ADDED button styling; MT-35) */
@@ -320,7 +333,11 @@ body {
   padding: 0;
 }
 
-/* Individual field row — flex wrap so secondary line drops below */
+/* Individual field row — flex wrap so secondary line drops below.
+   Phase 13: rendered as a white card (background + border-radius + margin) so
+   each field stands on its own visually.  The margin gap between cards replaces
+   the old border-bottom separator — a flat underline on a rounded element was a
+   visual artifact (design D-1). */
 .field-row {
   display: flex;
   flex-wrap: wrap;
@@ -328,8 +345,15 @@ body {
   min-height: 40px;
   padding: 6px 10px;
   gap: 0 6px;             /* column gap between inline items; no row gap */
-  border-bottom: 1px solid #F3F4F6;
+  background: #ffffff;
+  margin: 10px 0;
+  border-radius: 10px;
 }
+
+/* Guard rules — collapse the extra top/bottom margin on the first and last card
+   so they don't double-pad against the tabpanel's own 12px padding edges. */
+.field-row:first-child { margin-top: 0; }
+.field-row:last-child  { margin-bottom: 0; }
 
 /* Icon glyph — fixed 24px width so label and badge align regardless of glyph */
 .field-row__icon {
